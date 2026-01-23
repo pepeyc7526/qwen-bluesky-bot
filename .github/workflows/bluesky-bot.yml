@@ -17,13 +17,14 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Install system deps
+      - name: Install system dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y build-essential
 
-      - name: Install Python deps
-        run: pip install -r requirements.txt
+      - name: Install Python dependencies
+        run: |
+          pip install httpx llama-cpp-python
 
       - name: Download Phi-3 Mini GGUF model
         run: |
@@ -37,13 +38,14 @@ jobs:
           fi
           ls -lh
 
-      - name: Verify model exists
+      - name: Verify model file exists
         run: |
           if [ ! -f "models/Phi-3-mini-4k-instruct-q4.gguf" ]; then
-            echo "ERROR: Model file not found!"
+            echo "ERROR: Model file not found at expected path!"
             exit 1
+          else
+            echo "✅ Model found: models/Phi-3-mini-4k-instruct-q4.gguf"
           fi
-          echo "Model size: $(du -h models/Phi-3-mini-4k-instruct-q4.gguf)"
 
       - name: Run bot
         env:
