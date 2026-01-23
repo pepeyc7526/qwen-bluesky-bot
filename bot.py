@@ -1,34 +1,52 @@
 #!/usr/bin/env python3
 import os, json, datetime, asyncio, httpx
 
-# Configuration
-BOT_TOKEN = os.getenv("BLUESKY_TOKEN")
-LUMO_API_KEY = os.getenv("LUMO_API_KEY", "")
-OWNER_DID = "did:plc:topho472iindqxv5hm7nzww2"  # ваш DID
-MAX_LEN = 300
-ELLIPSIS = "…"
+# ---------- CONFIGURATION ----------
+BLUESKY_TOKEN = os.getenv("BLUESKY_TOKEN")          # token of the BOT account
+LUMO_API_KEY  = os.getenv("LUMO_API_KEY", "")
+BOT_HANDLE    = "lumobot-pepeyc7526.bsky.social"    # handle of the BOT account
+BOT_DID       = "did:plc:er457dupy7iytuzdgfmfsuv7"  # DID of the BOT account
+OWNER_DID     = "did:plc:topho472iindqxv5hm7nzww2" # your DID (to allow direct commands)
+MAX_LEN       = 300
+ELLIPSIS      = "…"
+# ------------------------------------
 
-STATE_FILE = "state.json"
+if not BLUESKY_TOKEN:
+    raise RuntimeError("BLUESKY_TOKEN missing – add it as a secret")
 
-if not BOT_TOKEN:
-    raise RuntimeError("BLUESKY_TOKEN is required")
+async def bluesky_stream():
+    url = "https://bsky.social/xrpc/com.atproto.sync.subscribeRepos"
+    async with httpx.AsyncClient(timeout=None) as client:
+        async with client.stream(
+            "GET", url,
+            headers={"Authorization": f"Bearer {BLUESKY_TOKEN}"}
+        ) as resp:
+            async for line in resp.aiter_lines():
+                if not line.strip():
+                    continue
+                try:
+                    ev = json.loads(line)
+                except Exception:
+                    continue
+                if ev.get("$type") != "com.atproto.sync.subscribeRepos#commit":
+                    continue
+                for op in ev.get("ops", []):
+                    if op.get("$type") != "app.bsky.feed.post":
+                        continue
+                    rec = op.get("payload", {})
+                    txt = rec.get("text", "")
+                    uri = rec.get("uri", "")
+                    author = rec.get("author", {})
+                    author_did = author.get("did", "")
 
-# Load last processed URI
-def load_last_uri():
-    if os.path.exists(STATE_FILE):
-        with open(STATE_FILE) as f:
-            return json.load(f).get("last_uri", "")
-    return ""
+                    # Check if post contains @bot AND starts with "check"
+                    if f"@{BOT_HANDLE}" not in txt.lower() and author_did != OWNER_DID:
+                        continue
 
-def save_last_uri(uri):
-    with open(STATE_FILE, "w") as f:
-        json.dump({"last_uri": uri}, f)
+                    if not txt.lower().strip().startswith("check"):
+                        continue
 
-async def get_author_feed(did: str):
-    url = f"https://public.api.bsky.app/xrpc/app.bsky.feed.getAuthorFeed?actor={did}&limit=10"
-    async with httpx.AsyncClient() as client:
-        r = await client.get(url)
-        return r.json()
+                    yield txt, uri, author_did
 
 async def ask_lumo(prompt: str) -> str:
     headers = {"Content-Type": "application/json"}
@@ -51,50 +69,41 @@ async def ask_lumo(prompt: str) -> str:
         answer = answer[: MAX_LEN - len(ELLIPSIS)] + ELLIPSIS
     return answer
 
-async def post_reply(text: str):
+async def post_reply(text: str, reply_to_uri: str):
     url = "https://bsky.social/xrpc/com.atproto.repo.createRecord"
     payload = {
         "$type": "app.bsky.feed.post",
         "text": text,
+        "reply": {
+            "root": {"uri": reply_to_uri, "cid": "PLACEHOLDER_CID"},  # CID needs to be fetched separately
+            "parent": {"uri": reply_to_uri, "cid": "PLACEHOLDER_CID"}
+        },
         "createdAt": datetime.datetime.utcnow().isoformat() + "Z"
     }
     async with httpx.AsyncClient() as client:
         await client.post(
             url,
             headers={
-                "Authorization": f"Bearer {BOT_TOKEN}",
+                "Authorization": f"Bearer {BLUESKY_TOKEN}",
                 "Content-Type": "application/json"
             },
             json=payload,
         )
 
 async def main():
-    last_uri = load_last_uri()
-    feed = await get_author_feed(OWNER_DID)
-    
-    for item in feed.get("feed", []):
-        post = item.get("post", {})
-        uri = post.get("uri", "")
-        text = post.get("record", {}).get("text", "")
+    async for txt, uri, author_did in bluesky_stream():
+        content = txt[len("check"):].strip()
+        if not content:
+            continue
 
-        # Пропустить, если уже обработан
-        if uri == last_uri:
-            break
-
-        # Проверить команду
-        if text.lower().strip().startswith("check"):
-            content = text[len("check"):].strip()
-            if content:
-                prompt = (
-                    "Provide a concise fact-check of the following claim. "
-                    "Respond in under 300 characters, without links or emojis.\n\n"
-                    f"{content}"
-                )
-                reply = await ask_lumo(prompt)
-                await post_reply(reply)
-                print(f"[{datetime.datetime.utcnow()}] Replied to {uri}")
-                save_last_uri(uri)
-                return  # обрабатываем только самый свежий
+        prompt = (
+            "Provide a concise fact-check of the following claim. "
+            "Respond in under 300 characters, without links or emojis.\n\n"
+            f"{content}"
+        )
+        reply = await ask_lumo(prompt)
+        await post_reply(reply, uri)  # Reply to the original post/comment
+        print(f"[{datetime.datetime.utcnow()}] Replied to {uri} by {author_did}")
 
 if __name__ == "__main__":
     asyncio.run(main())
