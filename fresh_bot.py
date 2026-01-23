@@ -64,6 +64,13 @@ async def get_notifications(token: str):
         r = await client.get(url, headers={"Authorization": f"Bearer {token}"})
         return r.json().get("notifications", [])
 
+async def get_author_feed(author_did: str, token: str):
+    url = "https://bsky.social/xrpc/app.bsky.feed.getAuthorFeed"
+    params = {"actor": author_did}
+    async with httpx.AsyncClient() as client:
+        r = await client.get(url, headers={"Authorization": f"Bearer {token}"}, params=params)
+        return r.json().get("feed", [])
+
 async def mark_as_read(token: str, seen_at: str):
     url = "https://bsky.social/xrpc/app.bsky.notification.updateSeen"
     payload = {"seenAt": seen_at}
@@ -102,8 +109,9 @@ async def post_reply(text: str, reply_to_uri: str, token: str):
 
 async def main():
     token = await get_fresh_token()
-    print("✅ Checking for mentions...")
+    print("✅ Checking for mentions and owner posts...")
 
+    # 1. Проверяем уведомления
     notifications = await get_notifications(token)
     print(f"📥 Found {len(notifications)} notifications")
 
@@ -116,13 +124,11 @@ async def main():
             continue
 
         txt = record.get("text", "")
-        uri = notif.get("uri", "")  # ← КЛЮЧЕВОЕ ИЗМЕНЕНИЕ
+        uri = notif.get("uri", "")
 
         if not uri:
-            print("   ⚠️ Skipped: no URI")
             continue
 
-        # Удаляем упоминание бота из текста
         clean_txt = txt
         bot_mention = "@bot-pepeyc7526.bsky.social"
         if clean_txt.startswith(bot_mention):
@@ -131,7 +137,7 @@ async def main():
         if not clean_txt:
             continue
 
-        print(f"🎯 Processing: {clean_txt[:50]}...")
+        print(f"🎯 Processing mention: {clean_txt[:50]}...")
         try:
             parent_text = ""
             if "reply" in record and "parent" in record["reply"]:
@@ -144,13 +150,37 @@ async def main():
             reply = ask_local(prompt)
             await post_reply(reply, uri, token)
             print(f"✅ Replied to {uri}")
+        except Exception as e:
+            print(f"[ERROR] {e}")
 
+    # 2. Проверяем последние посты владельца
+    print("🔍 Checking owner's recent posts...")
+    feed = await get_author_feed(OWNER_DID, token)
+    for item in feed[:5]:  # последние 5 постов
+        post = item.get("post", {})
+        record = post.get("record", {})
+        if record.get("$type") != "app.bsky.feed.post":
+            continue
+
+        txt = record.get("text", "")
+        uri = post.get("uri", "")
+
+        # Пропускаем, если уже отвечали (можно улучшить)
+        if not txt or txt.startswith("✅") or txt.startswith("📨"):
+            continue
+
+        print(f"👤 Owner post: {txt[:50]}...")
+        try:
+            prompt = f"User question: {txt}"
+            reply = ask_local(prompt)
+            await post_reply(reply, uri, token)
+            print(f"✅ Replied to owner post {uri}")
         except Exception as e:
             print(f"[ERROR] {e}")
 
     seen_at = datetime.datetime.utcnow().isoformat() + "Z"
     await mark_as_read(token, seen_at)
-    print("✅ All notifications marked as read")
+    print("✅ Done")
 
 if __name__ == "__main__":
     asyncio.run(main())
