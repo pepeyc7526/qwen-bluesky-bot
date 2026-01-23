@@ -1,4 +1,4 @@
-name: Bluesky AI Bot (Qwen2)
+name: Bluesky AI Bot (Qwen2 + Web Search)
 
 on:
   schedule:
@@ -58,12 +58,12 @@ jobs:
         env:
           BOT_HANDLE: ${{ secrets.BOT_HANDLE }}
           BOT_PASSWORD: ${{ secrets.BOT_PASSWORD }}
+          GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
+          GOOGLE_CSE_ID: ${{ secrets.GOOGLE_CSE_ID }}
         run: python fresh_bot.py
 
-      - name: Commit last_processed_post.txt (if changed)
+      - name: Commit state files (if changed)
         run: |
-          if [ -f "last_processed_post.txt" ]; then
-            git add last_processed_post.txt
-            git diff --cached --quiet || git commit -m "Update last processed post URI"
-            git push
-          fi
+          git add last_processed_post.txt search_usage.json 2>/dev/null || true
+          git diff --cached --quiet || git commit -m "Update bot state"
+          git push
