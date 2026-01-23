@@ -16,7 +16,7 @@ llm = Llama(model_path=MODEL_PATH, n_ctx=2048, n_threads=2, verbose=False)
 if not BOT_PASSWORD:
     raise RuntimeError("BOT_PASSWORD missing")
 
-# === ВЕБ-ПОИСК ===
+# === WEB SEARCH ===
 async def web_search(query: str) -> str:
     api_key = os.getenv("GOOGLE_API_KEY")
     cse_id = os.getenv("GOOGLE_CSE_ID")
@@ -57,29 +57,77 @@ def should_reset_counter():
     current_month = datetime.datetime.now().month
     return usage["month"] != current_month
 
-# === ОСТАЛЬНЫЕ ФУНКЦИИ БЕЗ ИЗМЕНЕНИЙ ===
-# (get_fresh_token, post_to_bluesky, get_record_cid, get_post_text, get_author_feed, mark_as_read, post_reply)
+# === BLUESKY FUNCTIONS ===
+async def get_fresh_token() -> str:
+    url = "https://bsky.social/xrpc/com.atproto.server.createSession"
+    payload = {"identifier": BOT_HANDLE, "password": BOT_PASSWORD}
+    async with httpx.AsyncClient() as client:
+        r = await client.post(url, json=payload)
+        return r.json()["accessJwt"]
 
-def ask_local(prompt: str, use_web_context=False) -> str:
-    system_msg = (
-        "You are a helpful AI assistant. "
-        "Use the provided context to answer accurately. "
-        "If no context, give a general answer. "
-        "Keep under 300 characters. Never use links or emojis."
-    )
+async def post_to_bluesky(text: str, token: str):
+    url = "https://bsky.social/xrpc/com.atproto.repo.createRecord"
+    payload = {
+        "repo": BOT_DID,
+        "collection": "app.bsky.feed.post",
+        "record": {
+            "$type": "app.bsky.feed.post",
+            "text": text,
+            "createdAt": datetime.datetime.utcnow().isoformat() + "Z"
+        }
+    }
+    async with httpx.AsyncClient() as client:
+        await client.post(url, headers={"Authorization": f"Bearer {token}"}, json=payload)
+
+async def get_record_cid(uri: str, token: str):
+    try:
+        parts = uri.split("/")
+        repo, collection, rkey = parts[2], parts[3], parts[4]
+        url = f"https://bsky.social/xrpc/com.atproto.repo.getRecord?repo={repo}&collection={collection}&rkey={rkey}"
+        async with httpx.AsyncClient() as client:
+            r = await client.get(url, headers={"Authorization": f"Bearer {token}"})
+            return r.json()["cid"]
+    except Exception:
+        return "bafyreihjdbd4zq4f4a5v6w5z5g5q5j5j5j5j5j5j5j5j5j5j5j5j5j5j5j5j5j"
+
+async def get_post_text(uri: str, token: str) -> str:
+    try:
+        parts = uri.split("/")
+        repo, rkey = parts[2], parts[4]
+        url = f"https://bsky.social/xrpc/com.atproto.repo.getRecord?repo={repo}&collection=app.bsky.feed.post&rkey={rkey}"
+        async with httpx.AsyncClient() as client:
+            r = await client.get(url, headers={"Authorization": f"Bearer {token}"})
+            return r.json()["value"]["text"]
+    except Exception:
+        return ""
+
+async def get_author_feed(author_did: str, token: str):
+    url = "https://bsky.social/xrpc/app.bsky.feed.getAuthorFeed"
+    params = {"actor": author_did}
+    async with httpx.AsyncClient() as client:
+        r = await client.get(url, headers={"Authorization": f"Bearer {token}"}, params=params)
+        return r.json().get("feed", [])
+
+async def mark_as_read(token: str, seen_at: str):
+    url = "https://bsky.social/xrpc/app.bsky.notification.updateSeen"
+    payload = {"seenAt": seen_at}
+    async with httpx.AsyncClient() as client:
+        await client.post(url, headers={"Authorization": f"Bearer {token}"}, json=payload)
+
+def ask_local(prompt: str) -> str:
     messages = [
-        {"role": "system", "content": system_msg},
+        {"role": "system", "content": "You are a helpful AI assistant. Use context if provided. Keep under 300 chars. No links or emojis."},
         {"role": "user", "content": prompt}
     ]
     
     full_prompt = ""
     for msg in messages:
         if msg["role"] == "user":
-            full_prompt += f"<|im_start|>user\n{msg['content']}<|im_end|>\n"
+            full_prompt += f"<|im_start|>user\n{msg['content']}<|im_end|>>\n"
         elif msg["role"] == "assistant":
-            full_prompt += f"<|im_start|>assistant\n{msg['content']}<|im_end|>\n"
+            full_prompt += f"<|im_start|>assistant\n{msg['content']}<|im_end|>>\n"
         else:
-            full_prompt += f"<|im_start|>system\n{msg['content']}<|im_end|>\n"
+            full_prompt += f"<|im_start|>system\n{msg['content']}<|im_end|>>\n"
     full_prompt += "<|im_start|>assistant\n"
 
     out = llm(
@@ -97,15 +145,44 @@ def ask_local(prompt: str, use_web_context=False) -> str:
 
     return ans[:MAX_LEN] if len(ans) > MAX_LEN else ans
 
+async def post_reply(text: str, reply_to_uri: str, token: str):
+    cid = await get_record_cid(reply_to_uri, token)
+    url = "https://bsky.social/xrpc/com.atproto.repo.createRecord"
+    payload = {
+        "repo": BOT_DID,
+        "collection": "app.bsky.feed.post",
+        "record": {
+            "$type": "app.bsky.feed.post",
+            "text": text,
+            "reply": {
+                "root": {"uri": reply_to_uri, "cid": cid},
+                "parent": {"uri": reply_to_uri, "cid": cid}
+            },
+            "createdAt": datetime.datetime.utcnow().isoformat() + "Z"
+        }
+    }
+    async with httpx.AsyncClient() as client:
+        await client.post(url, headers={"Authorization": f"Bearer {token}"}, json=payload)
+
 # === MAIN ===
+def get_last_processed_uri():
+    if os.path.exists(LAST_POST_FILE):
+        with open(LAST_POST_FILE, "r") as f:
+            return f.read().strip()
+    return None
+
+def save_last_processed_uri(uri):
+    with open(LAST_POST_FILE, "w") as f:
+        f.write(uri)
+
 async def main():
     token = await get_fresh_token()
     print("✅ Checking only YOUR requests...")
 
-    # Сброс счётчика, если новый месяц
+    # Reset counter if new month
     if should_reset_counter():
         save_search_usage(0)
-        print("📅 Search counter reset for new month")
+        print("📅 Search counter reset")
 
     last_uri = get_last_processed_uri()
     print(f"⏭️ Skipping posts before: {last_uri}")
@@ -131,10 +208,9 @@ async def main():
 
         replied = False
 
-        # === ОБРАБОТКА ЗАПРОСОВ ===
+        # === ai web ... ===
         if clean_txt.lower().startswith("ai web "):
-            # Веб-поиск
-            content = clean_txt[5:].strip()
+            content = clean_txt[7:].strip()
             if content:
                 usage = load_search_usage()
                 if usage["count"] >= 100:
@@ -142,20 +218,16 @@ async def main():
                 else:
                     print(f"🌐 Web search ({usage['count']+1}/100): {content}")
                     context = await web_search(content)
-                    if context:
-                        prompt = f"Context: {context}\nQuestion: {content}"
-                    else:
-                        prompt = f"Question: {content}"
+                    prompt = f"Context: {context}\nQuestion: {content}" if context else f"Question: {content}"
                     reply = ask_local(prompt)
-                    # Сохраняем счётчик
                     save_search_usage(usage["count"] + 1)
                 await post_reply(reply, uri, token)
                 print(f"✅ Replied (web) to {uri}")
                 replied_uri = uri
                 replied = True
 
+        # === ai ... ===
         elif clean_txt.lower().startswith("ai "):
-            # Локальная модель
             content = clean_txt[3:].strip()
             if content:
                 reply = ask_local(f"Question: {content}")
@@ -164,6 +236,7 @@ async def main():
                 replied_uri = uri
                 replied = True
 
+        # === @bot ... ===
         elif clean_txt.startswith("@bot-pepeyc7526.bsky.social"):
             content = clean_txt[len("@bot-pepeyc7526.bsky.social"):].strip()
             if content:
@@ -183,15 +256,5 @@ async def main():
     await mark_as_read(token, seen_at)
     print("✅ Done")
 
-# === ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ===
-def get_last_processed_uri():
-    if os.path.exists(LAST_POST_FILE):
-        with open(LAST_POST_FILE, "r") as f:
-            return f.read().strip()
-    return None
-
-def save_last_processed_uri(uri):
-    with open(LAST_POST_FILE, "w") as f:
-        f.write(uri)
-
-# ... остальные функции (get_fresh_token, post_to_bluesky и т.д.) — как в предыдущей версии
+if __name__ == "__main__":
+    asyncio.run(main())
