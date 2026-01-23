@@ -1,4 +1,4 @@
-name: Bluesky Fact Bot
+name: Bluesky AI Bot
 
 on:
   schedule:
