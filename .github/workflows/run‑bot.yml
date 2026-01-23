@@ -2,8 +2,8 @@ name: Fact-Check Bot
 
 on:
   schedule:
-    - cron: '*/5 * * * *'  # раз в 5 минут (GitHub не позволяет чаще)
-  workflow_dispatch:       # можно запустить вручную
+    - cron: '*/5 * * * *'
+  workflow_dispatch:
 
 jobs:
   run:
@@ -28,4 +28,9 @@ jobs:
       - name: Commit updated state (if changed)
         run: |
           git config --global user.name "github-actions[bot]"
-          git config --global user.email "github-actions[bot]@users.nore
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git add state.json
+          if [ -n "$(git status --porcelain)" ]; then
+            git commit -m "Update last processed URI"
+            git push
+          fi
