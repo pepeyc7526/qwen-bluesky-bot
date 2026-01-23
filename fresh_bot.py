@@ -15,7 +15,7 @@ llm = Llama(model_path=MODEL_PATH, n_ctx=2048, n_threads=2, verbose=False)
 if not BOT_PASSWORD:
     raise RuntimeError("BOT_PASSWORD missing")
 
-# === WEB SEARCH (same as before) ===
+# === WEB SEARCH ===
 async def web_search(query: str) -> str:
     api_key = os.getenv("GOOGLE_API_KEY")
     cse_id = os.getenv("GOOGLE_CSE_ID")
@@ -189,7 +189,13 @@ async def main():
         if not uri:
             continue
 
+        # Удаляем упоминание бота
         clean_txt = txt.strip()
+        bot_mention = f"@{BOT_HANDLE}"
+        if clean_txt.startswith(bot_mention):
+            clean_txt = clean_txt[len(bot_mention):].strip()
+
+        print(f"🔍 Cleaned text: '{clean_txt}'")
 
         # === ai web ... ===
         if clean_txt.lower().startswith("ai web "):
@@ -217,7 +223,6 @@ async def main():
                 print(f"✅ Replied (local) to {uri}")
                 replied = True
 
-        # После ответа — помечаем как прочитанное
         if replied:
             break
 
