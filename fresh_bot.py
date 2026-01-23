@@ -164,7 +164,6 @@ async def main():
     notifications = await get_notifications(token)
     print(f"📥 Found {len(notifications)} notifications")
 
-    replied = False
     for notif in notifications:
         # Пропускаем, если уже прочитано
         if notif.get("isRead"):
@@ -212,7 +211,6 @@ async def main():
                     save_search_usage(usage["count"] + 1)
                 await post_reply(reply, uri, token)
                 print(f"✅ Replied (web) to {uri}")
-                replied = True
 
         # === ai ... ===
         elif clean_txt.lower().startswith("ai "):
@@ -221,10 +219,6 @@ async def main():
                 reply = ask_local(f"Question: {content}")
                 await post_reply(reply, uri, token)
                 print(f"✅ Replied (local) to {uri}")
-                replied = True
-
-        if replied:
-            break
 
     # Помечаем всё как прочитанное
     seen_at = datetime.datetime.utcnow().isoformat() + "Z"
