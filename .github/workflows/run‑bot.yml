@@ -1,0 +1,32 @@
+name: Fact-Check Bot
+
+on:
+  schedule:
+    - cron: '*/5 * * * *'  # раз в 5 минут (GitHub не позволяет чаще)
+  workflow_dispatch:       # можно запустить вручную
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install httpx
+
+      - name: Run bot
+        env:
+          BLUESKY_TOKEN: ${{ secrets.BLUESKY_TOKEN }}
+          LUMO_API_KEY: ${{ secrets.LUMO_API_KEY }}
+        run: python bot.py
+
+      - name: Commit updated state (if changed)
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.nore
