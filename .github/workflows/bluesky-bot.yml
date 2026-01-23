@@ -11,6 +11,8 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.PAT }}
 
       - name: Set up Python 3.11
         uses: actions/setup-python@v5
@@ -22,18 +24,13 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y build-essential git
 
-      - name: Configure Git
-        run: |
-          git config --global user.email "actions@github.com"
-          git config --global user.name "GitHub Actions"
-
       - name: Install Python dependencies
         run: |
           pip install httpx llama-cpp-python
 
       - name: Download Qwen2-7B GGUF model
         run: |
-          mkdir -p models
+          mkdir - p models
           cd models
           if [ ! -f "qwen2-7b-instruct-q4_k_m.gguf" ]; then
             echo "Downloading Qwen2-7B (Q4)..."
@@ -59,6 +56,8 @@ jobs:
       - name: Commit last_processed_post.txt (if changed)
         run: |
           if [ -f "last_processed_post.txt" ]; then
+            git config --global user.email "actions@github.com"
+            git config --global user.name "GitHub Actions"
             git add last_processed_post.txt
             git diff --cached --quiet || git commit -m "Update last processed post URI"
             git push
