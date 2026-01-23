@@ -61,9 +61,3 @@ jobs:
           GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
           GOOGLE_CSE_ID: ${{ secrets.GOOGLE_CSE_ID }}
         run: python fresh_bot.py
-
-      - name: Commit state files (if changed)
-        run: |
-          git add last_processed_post.txt search_usage.json 2>/dev/null || true
-          git diff --cached --quiet || git commit -m "Update bot state"
-          git push
