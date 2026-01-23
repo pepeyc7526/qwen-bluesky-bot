@@ -25,12 +25,16 @@ jobs:
           BLUESKY_TOKEN: ${{ secrets.BLUESKY_TOKEN }}
         run: python bot.py
 
+      - name: Configure git user name
+        run: git config --global user.name "github-actions"
+
+      - name: Configure git user email
+        run: git config --global user.email "github-actions@users.noreply.github.com"
+
       - name: Commit updated state (if changed)
         run: |
-          git config --global user.name 'github-actions'
-          git config --global user.email 'github-actions@users.noreply.github.com'
           git add state.json
           if [ -n "$(git status --porcelain)" ]; then
-            git commit -m 'Update last processed URI'
+            git commit -m "Update last processed URI"
             git push
           fi
