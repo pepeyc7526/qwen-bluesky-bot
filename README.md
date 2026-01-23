@@ -10,11 +10,13 @@
 ## ✨ Features
 
 - ✅ Answers **only to you**
+- ✅ Triggered by **mentions**: `@your-bot.bsky.social ai ...`
 - ✅ Uses **local LLM** (Qwen2-7B) — no data leaves your workflow
 - ✅ Optional **web search**: just type `ai web ...`
 - ✅ **100 free web searches/day** (via Google CSE)
 - ✅ Runs on **GitHub Actions** — completely free
-- ✅ No external servers, no subscriptions
+- ✅ **No state files** — uses notifications, not post history
+- ✅ Automatically marks notifications as read
 
 ---
 
@@ -62,8 +64,8 @@ Add these:
 ### 5. Use your bot
 Post from **your main account**:
 
-- `ai What is AI?` → local answer
-- `ai web What is Chainbase?` → with web search
+- `@your-bot.bsky.social ai What is AI?` → local answer
+- `@your-bot.bsky.social ai web What is Chainbase?` → with web search
 
 > 📌 The bot **only responds to you** — no one else can trigger it.
 
@@ -109,13 +111,16 @@ Post from **your main account**:
 A: Yes. GitHub Actions + Google CSE are free within limits.
 
 **Q: Can others use my bot?**  
-A: No. It only reads **your posts** (via your DID).
+A: No. It only processes **mentions from your DID**.
 
 **Q: Why 20-minute delay?**  
 A: GitHub Actions cron has a hard limit of once per 20 minutes.
 
-**Q: Can I make it faster?**  
-A: Only by triggering manually or using a paid server (not recommended for personal use).
+**Q: Does it store my data?**  
+A: No. It only stores a **search counter** (`search_usage.json`) to respect quotas.
+
+**Q: What if I delete `search_usage.json`?**  
+A: The counter resets — but that’s safe.
 
 ---
 
@@ -127,7 +132,7 @@ If you run into issues, you can ask for help using this prompt:
 > “I’m setting up the Bluesky AI Bot from https://github.com/pepeyc7526/bluesky-ai-bot.  
 > I’ve done [steps X, Y, Z], but [describe issue].  
 > Here’s my log/error: [paste].  
-> My setup: [public/private repo, web search enabled?, etc.]”
+> My setup: [public repo, web search enabled?, etc.]”
 
 This gives enough context to debug quickly — no guesswork needed.
 
