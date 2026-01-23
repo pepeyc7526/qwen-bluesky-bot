@@ -1,0 +1,2 @@
+httpx
+llama-cpp-python==0.2.89
