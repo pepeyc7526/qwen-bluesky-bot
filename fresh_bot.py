@@ -4,7 +4,7 @@ from llama_cpp import Llama
 
 # ---------- CONFIG ----------
 BLUESKY_TOKEN = os.getenv("BLUESKY_TOKEN")
-BOT_HANDLE    = "lumobot-pepeyc7526.bsky.social"
+BOT_HANDLE = "bot-pepeyc7526.bsky.social"
 OWNER_DID     = "did:plc:topho472iindqxv5hm7nzww2"
 MAX_LEN       = 300
 ELLIPSIS      = "…"
