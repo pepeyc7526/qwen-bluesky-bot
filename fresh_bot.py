@@ -107,35 +107,31 @@ async def main():
     notifications = await get_notifications(token)
     print(f"📥 Found {len(notifications)} notifications")
 
-    for i, notif in enumerate(notifications):
-        print(f"\n🔍 Notification {i+1}:")
-        print(f"   Reason: {notif.get('reason')}")
-        print(f"   Is Read: {notif.get('isRead')}")
-        record = notif.get("record", {})
-        print(f"   Record type: {record.get('$type')}")
-        txt = record.get("text", "")
-        print(f"   Text: '{txt}'")
-        uri = record.get("uri", "")
-        print(f"   URI: {uri}")
-
+    for notif in notifications:
         if notif.get("reason") != "mention":
-            print("   ➡️ Skipped: not a mention")
             continue
 
+        record = notif.get("record", {})
         if record.get("$type") != "app.bsky.feed.post":
-            print("   ➡️ Skipped: not a post")
             continue
 
-        if not txt.lower().strip().startswith("ai"):
-            print("   ➡️ Skipped: doesn't start with 'ai'")
+        txt = record.get("text", "")
+        uri = record.get("uri", "")
+
+        # Очистка от упоминания
+        clean_txt = txt.lower().strip()
+        bot_mention = f"@{BOT_HANDLE.lower()}"
+        if clean_txt.startswith(bot_mention):
+            clean_txt = clean_txt[len(bot_mention):].strip()
+
+        if not clean_txt.startswith("ai"):
             continue
 
-        # Временно отключаем isRead
+        # Пропускаем, если уже обработано (опционально)
         # if notif.get("isRead"):
-        #     print("   ➡️ Skipped: already read")
         #     continue
 
-        print(f"🎯 MATCH! Processing: {txt[:50]}...")
+        print(f"🎯 Processing: {txt[:50]}...")
         try:
             parent_text = ""
             if "reply" in record and "parent" in record["reply"]:
@@ -143,7 +139,7 @@ async def main():
                 parent_text = await get_post_text(parent_uri, token)
                 prompt = f"Parent: {parent_text}\nComment: {txt}"
             else:
-                content = txt[len("ai"):].strip()
+                content = clean_txt[len("ai"):].strip()
                 prompt = f"User request: {content}"
 
             reply = ask_local(prompt)
@@ -155,7 +151,7 @@ async def main():
 
     seen_at = datetime.datetime.utcnow().isoformat() + "Z"
     await mark_as_read(token, seen_at)
-    print("\n✅ All notifications marked as read")
+    print("✅ All notifications marked as read")
 
 if __name__ == "__main__":
     asyncio.run(main())
