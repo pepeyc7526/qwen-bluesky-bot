@@ -15,14 +15,12 @@ llm = Llama(model_path=MODEL_PATH, n_ctx=2048, n_threads=2, verbose=False)
 if not BOT_PASSWORD:
     raise RuntimeError("BOT_PASSWORD missing")
 
-# Читаем последний обработанный URI
 def get_last_processed_uri():
     if os.path.exists(LAST_POST_FILE):
         with open(LAST_POST_FILE, "r") as f:
             return f.read().strip()
     return None
 
-# Сохраняем URI
 def save_last_processed_uri(uri):
     with open(LAST_POST_FILE, "w") as f:
         f.write(uri)
@@ -92,11 +90,11 @@ def ask_local(prompt: str) -> str:
     full_prompt = ""
     for msg in messages:
         if msg["role"] == "user":
-            full_prompt += f"<|im_start|>user\n{msg['content']}<|im_end|>>\n"
+            full_prompt += f"<|im_start|>user\n{msg['content']}<|im_end|>\n"
         elif msg["role"] == "assistant":
-            full_prompt += f"<|im_start|>assistant\n{msg['content']}<|im_end|>>\n"
+            full_prompt += f"<|im_start|>assistant\n{msg['content']}<|im_end|>\n"
         else:
-            full_prompt += f"<|im_start|>system\n{msg['content']}<|im_end|>>\n"
+            full_prompt += f"<|im_start|>system\n{msg['content']}<|im_end|>\n"
     full_prompt += "<|im_start|>assistant\n"
 
     out = llm(
@@ -143,7 +141,7 @@ async def main():
     feed = await get_author_feed(OWNER_DID, token)
     replied_uri = None
 
-    for item in feed[:10]:  # проверяем больше постов на всякий
+    for item in feed[:10]:
         post = item.get("post", {})
         record = post.get("record", {})
         if record.get("$type") != "app.bsky.feed.post":
@@ -153,7 +151,6 @@ async def main():
         if not uri:
             continue
 
-        # Пропускаем уже обработанные
         if last_uri and uri == last_uri:
             break
 
@@ -185,12 +182,11 @@ async def main():
                 replied = True
 
         if replied:
-            break  # только один ответ за запуск
+            break
 
-    # Сохраняем последний обработанный URI
     if replied_uri:
         save_last_processed_uri(replied_uri)
-        print(f"💾 Saved last processed URI")
+        print(f"💾 Saved last processed URI: {replied_uri}")
 
     seen_at = datetime.datetime.utcnow().isoformat() + "Z"
     await mark_as_read(token, seen_at)
