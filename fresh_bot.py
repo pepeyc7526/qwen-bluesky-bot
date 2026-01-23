@@ -14,6 +14,18 @@ ELLIPSIS      = "…"
 if not BLUESKY_TOKEN:
     raise RuntimeError("BLUESKY_TOKEN missing – add it as a secret")
 
+async def get_record_cid(uri: str):
+    """Fetch the CID for a given URI."""
+    try:
+        repo, collection, rkey = uri.split("/")[2], uri.split("/")[3], uri.split("/")[4]
+        url = f"https://bsky.social/xrpc/com.atproto.repo.getRecord?repo={repo}&collection={collection}&rkey={rkey}"
+        async with httpx.AsyncClient() as client:
+            r = await client.get(url)
+            r.raise_for_status()
+            return r.json()["cid"]
+    except Exception:
+        return None  # fallback to placeholder if CID fetch fails
+
 async def bluesky_stream():
     url = "https://bsky.social/xrpc/com.atproto.sync.subscribeRepos"
     async with httpx.AsyncClient(timeout=None) as client:
@@ -39,7 +51,7 @@ async def bluesky_stream():
                     author = rec.get("author", {})
                     author_did = author.get("did", "")
 
-                    # Check if post contains @bot AND starts with "check"
+                    # Check if post contains @bot AND starts with "check", OR from owner
                     if f"@{BOT_HANDLE}" not in txt.lower() and author_did != OWNER_DID:
                         continue
 
@@ -62,6 +74,7 @@ async def ask_lumo(prompt: str) -> str:
             headers=headers,
             json=payload,
         )
+        r.raise_for_status()
         data = r.json()
         answer = data["choices"][0]["message"]["content"]
     answer = " ".join(answer.split())
@@ -70,13 +83,18 @@ async def ask_lumo(prompt: str) -> str:
     return answer
 
 async def post_reply(text: str, reply_to_uri: str):
+    cid = await get_record_cid(reply_to_uri)
+    if not cid:
+        print(f"Warning: Could not fetch CID for {reply_to_uri}. Using placeholder.")
+        cid = "PLACEHOLDER_CID"
+
     url = "https://bsky.social/xrpc/com.atproto.repo.createRecord"
     payload = {
         "$type": "app.bsky.feed.post",
         "text": text,
         "reply": {
-            "root": {"uri": reply_to_uri, "cid": "PLACEHOLDER_CID"},  # CID needs to be fetched separately
-            "parent": {"uri": reply_to_uri, "cid": "PLACEHOLDER_CID"}
+            "root": {"uri": reply_to_uri, "cid": cid},
+            "parent": {"uri": reply_to_uri, "cid": cid}
         },
         "createdAt": datetime.datetime.utcnow().isoformat() + "Z"
     }
@@ -101,9 +119,12 @@ async def main():
             "Respond in under 300 characters, without links or emojis.\n\n"
             f"{content}"
         )
-        reply = await ask_lumo(prompt)
-        await post_reply(reply, uri)  # Reply to the original post/comment
-        print(f"[{datetime.datetime.utcnow()}] Replied to {uri} by {author_did}")
+        try:
+            reply = await ask_lumo(prompt)
+            await post_reply(reply, uri)
+            print(f"[{datetime.datetime.utcnow()}] Replied to {uri} by {author_did}")
+        except Exception as e:
+            print(f"[ERROR] Failed to process {uri}: {e}")
 
 if __name__ == "__main__":
     asyncio.run(main())
