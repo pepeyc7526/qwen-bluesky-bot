@@ -2,7 +2,7 @@ name: Bluesky Fact Bot
 
 on:
   schedule:
-    - cron: '*/15 * * * *'  # every 15 minutes
+    - cron: '*/15 * * * *'
   workflow_dispatch:
 
 jobs:
@@ -17,20 +17,33 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Install system deps (for llama-cpp)
+      - name: Install system deps
         run: |
           sudo apt-get update
           sudo apt-get install -y build-essential
 
       - name: Install Python deps
-        run: |
-          pip install -r requirements.txt
+        run: pip install -r requirements.txt
 
       - name: Download Phi-3 Mini GGUF model
         run: |
           mkdir -p models
-          curl -L https://huggingface.co/microsoft/Phi-3-mini-4k-instruct-gguf/resolve/main/phi-3-mini-4k-instruct-q4_k_m.gguf \
-            -o models/phi-3-mini-4k-instruct-q4_k_m.gguf
+          cd models
+          if [ ! -f "Phi-3-mini-4k-instruct-q4.gguf" ]; then
+            echo "Downloading Phi-3 Mini (Q4)..."
+            curl -L --retry 3 --user-agent "GitHub-Actions" \
+              -o "Phi-3-mini-4k-instruct-q4.gguf" \
+              "https://huggingface.co/microsoft/Phi-3-mini-4k-instruct-gguf/resolve/main/Phi-3-mini-4k-instruct-q4.gguf?download=true"
+          fi
+          ls -lh
+
+      - name: Verify model exists
+        run: |
+          if [ ! -f "models/Phi-3-mini-4k-instruct-q4.gguf" ]; then
+            echo "ERROR: Model file not found!"
+            exit 1
+          fi
+          echo "Model size: $(du -h models/Phi-3-mini-4k-instruct-q4.gguf)"
 
       - name: Run bot
         env:
