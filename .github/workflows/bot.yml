@@ -23,7 +23,6 @@ jobs:
       - name: Run bot
         env:
           BLUESKY_TOKEN: ${{ secrets.BLUESKY_TOKEN }}
-          LUMO_API_KEY: ${{ secrets.LUMO_API_KEY }}
         run: python bot.py
 
       - name: Commit updated state (if changed)
