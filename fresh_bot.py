@@ -4,7 +4,7 @@ from llama_cpp import Llama
 
 # ---------- CONFIG ----------
 BLUESKY_TOKEN = os.getenv("BLUESKY_TOKEN")
-BOT_HANDLE    = "bot-pepeyc7526.bsky.social"  # без @
+BOT_HANDLE    = "bot-pepeyc7526.bsky.social"
 OWNER_DID     = "did:plc:topho472iindqxv5hm7nzww2"
 MAX_LEN       = 300
 ELLIPSIS      = "…"
@@ -15,6 +15,24 @@ llm = Llama(model_path=MODEL_PATH, n_ctx=2048, n_threads=2, verbose=False)
 
 if not BLUESKY_TOKEN:
     raise RuntimeError("BLUESKY_TOKEN missing")
+
+async def post_to_bluesky(text: str):
+    """Post a standalone message from the bot."""
+    url = "https://bsky.social/xrpc/com.atproto.repo.createRecord"
+    payload = {
+        "$type": "app.bsky.feed.post",
+        "text": text,
+        "createdAt": datetime.datetime.utcnow().isoformat() + "Z"
+    }
+    async with httpx.AsyncClient() as client:
+        await client.post(
+            url,
+            headers={
+                "Authorization": f"Bearer {BLUESKY_TOKEN}",
+                "Content-Type": "application/json"
+            },
+            json=payload,
+        )
 
 async def get_record_cid(uri: str):
     try:
@@ -28,7 +46,6 @@ async def get_record_cid(uri: str):
         return "bafyreihjdbd4zq4f4a5v6w5z5g5q5j5j5j5j5j5j5j5j5j5j5j5j5j5j5j5j5j"
 
 async def get_post_text(uri: str) -> str:
-    """Fetch text of a post by URI."""
     try:
         parts = uri.split("/")
         repo, rkey = parts[2], parts[4]
@@ -41,6 +58,7 @@ async def get_post_text(uri: str) -> str:
         return ""
 
 async def bluesky_stream():
+    print("📡 Connecting to Bluesky event stream...")
     url = "https://bsky.social/xrpc/com.atproto.sync.subscribeRepos"
     async with httpx.AsyncClient(timeout=None) as client:
         async with client.stream("GET", url, headers={"Authorization": f"Bearer {BLUESKY_TOKEN}"}) as resp:
@@ -57,7 +75,6 @@ async def bluesky_stream():
                     uri = rec.get("uri", "")
                     author_did = ev.get("repo", "")
 
-                    # Check if it's a reply and get parent URI
                     reply_to_uri = None
                     if "reply" in rec and "parent" in rec["reply"]:
                         reply_to_uri = rec["reply"]["parent"]["uri"]
@@ -90,23 +107,41 @@ async def post_reply(text: str, reply_to_uri: str):
         "createdAt": datetime.datetime.utcnow().isoformat() + "Z"
     }
     async with httpx.AsyncClient() as client:
-        await client.post(url, headers={"Authorization": f"Bearer {BLUESKY_TOKEN}", "Content-Type": "application/json"}, json=payload)
+        await client.post(
+            url,
+            headers={
+                "Authorization": f"Bearer {BLUESKY_TOKEN}",
+                "Content-Type": "application/json"
+            },
+            json=payload,
+        )
 
 async def main():
-    async for txt, uri, author_did, reply_to_uri in bluesky_stream():
-        if reply_to_uri:
-            parent_text = await get_post_text(reply_to_uri)
-            prompt = f"Parent post: {parent_text}\n\nUser comment: {txt}"
-        else:
-            content = txt[len("check"):].strip()
-            prompt = f"User request: {content}"
+    print("✅ Bot started. Posting startup message...")
+    try:
+        await post_to_bluesky("✅ Bot started")
+    except Exception as e:
+        print(f"[ERROR] Failed to post startup message: {e}")
 
+    print("👂 Listening for 'check' mentions or commands from owner...")
+    async for txt, uri, author_did, reply_to_uri in bluesky_stream():
+        print(f"📬 Received request: {txt[:50]}...")
         try:
+            if reply_to_uri:
+                parent_text = await get_post_text(reply_to_uri)
+                prompt = f"Parent post: {parent_text}\n\nUser comment: {txt}"
+            else:
+                content = txt[len("check"):].strip()
+                prompt = f"User request: {content}"
+
             reply = ask_local(prompt)
             await post_reply(reply, uri)
             print(f"[{datetime.datetime.utcnow()}] Replied to {uri}")
+
+            # Post confirmation
+            await post_to_bluesky("📨 Processed a 'check' request")
         except Exception as e:
-            print(f"[ERROR] {e}")
+            print(f"[ERROR] Failed to process {uri}: {e}")
 
 if __name__ == "__main__":
     asyncio.run(main())
