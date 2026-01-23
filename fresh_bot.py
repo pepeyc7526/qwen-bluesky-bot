@@ -4,7 +4,7 @@ from llama_cpp import Llama
 
 # ---------- CONFIG ----------
 BLUESKY_TOKEN = os.getenv("BLUESKY_TOKEN")
-BOT_HANDLE = "bot-pepeyc7526.bsky.social"
+BOT_HANDLE    = "bot-pepeyc7526.bsky.social"  # без @
 OWNER_DID     = "did:plc:topho472iindqxv5hm7nzww2"
 MAX_LEN       = 300
 ELLIPSIS      = "…"
@@ -27,6 +27,19 @@ async def get_record_cid(uri: str):
     except Exception:
         return "bafyreihjdbd4zq4f4a5v6w5z5g5q5j5j5j5j5j5j5j5j5j5j5j5j5j5j5j5j5j"
 
+async def get_post_text(uri: str) -> str:
+    """Fetch text of a post by URI."""
+    try:
+        parts = uri.split("/")
+        repo, rkey = parts[2], parts[4]
+        url = f"https://bsky.social/xrpc/com.atproto.repo.getRecord?repo={repo}&collection=app.bsky.feed.post&rkey={rkey}"
+        async with httpx.AsyncClient() as client:
+            r = await client.get(url)
+            r.raise_for_status()
+            return r.json()["value"]["text"]
+    except Exception:
+        return ""
+
 async def bluesky_stream():
     url = "https://bsky.social/xrpc/com.atproto.sync.subscribeRepos"
     async with httpx.AsyncClient(timeout=None) as client:
@@ -43,15 +56,22 @@ async def bluesky_stream():
                     txt = rec.get("text", "")
                     uri = rec.get("uri", "")
                     author_did = ev.get("repo", "")
+
+                    # Check if it's a reply and get parent URI
+                    reply_to_uri = None
+                    if "reply" in rec and "parent" in rec["reply"]:
+                        reply_to_uri = rec["reply"]["parent"]["uri"]
+
                     mentioned = f"@{BOT_HANDLE}" in txt.lower()
                     from_owner = (author_did == OWNER_DID)
                     if not (mentioned or from_owner): continue
                     if not txt.lower().strip().startswith("check"): continue
-                    yield txt, uri, author_did
+
+                    yield txt, uri, author_did, reply_to_uri
 
 def ask_local(prompt: str) -> str:
     full_prompt = (
-        "<|user|>\nProvide a concise fact-check of the following claim. "
+        "<|user|>\nProvide a concise answer or fact-check based on the context. "
         "Respond in under 300 characters, without links or emojis.\n\n"
         f"{prompt}\n<|end|>\n<|assistant|>\n"
     )
@@ -73,11 +93,16 @@ async def post_reply(text: str, reply_to_uri: str):
         await client.post(url, headers={"Authorization": f"Bearer {BLUESKY_TOKEN}", "Content-Type": "application/json"}, json=payload)
 
 async def main():
-    async for txt, uri, author_did in bluesky_stream():
-        content = txt[len("check"):].strip()
-        if not content: continue
+    async for txt, uri, author_did, reply_to_uri in bluesky_stream():
+        if reply_to_uri:
+            parent_text = await get_post_text(reply_to_uri)
+            prompt = f"Parent post: {parent_text}\n\nUser comment: {txt}"
+        else:
+            content = txt[len("check"):].strip()
+            prompt = f"User request: {content}"
+
         try:
-            reply = ask_local(content)
+            reply = ask_local(prompt)
             await post_reply(reply, uri)
             print(f"[{datetime.datetime.utcnow()}] Replied to {uri}")
         except Exception as e:
