@@ -17,7 +17,6 @@ if not BLUESKY_TOKEN:
     raise RuntimeError("BLUESKY_TOKEN missing")
 
 async def post_to_bluesky(text: str):
-    """Post a standalone message from the bot."""
     url = "https://bsky.social/xrpc/com.atproto.repo.createRecord"
     payload = {
         "$type": "app.bsky.feed.post",
@@ -120,6 +119,7 @@ async def main():
     print("✅ Bot started. Posting startup message...")
     try:
         await post_to_bluesky("✅ Bot started")
+        print("✅ Startup post published!")
     except Exception as e:
         print(f"[ERROR] Failed to post startup message: {e}")
 
@@ -138,8 +138,8 @@ async def main():
             await post_reply(reply, uri)
             print(f"[{datetime.datetime.utcnow()}] Replied to {uri}")
 
-            # Post confirmation
             await post_to_bluesky("📨 Processed a 'check' request")
+            print("✅ Confirmation post published!")
         except Exception as e:
             print(f"[ERROR] Failed to process {uri}: {e}")
 
