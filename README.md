@@ -4,4 +4,4 @@ This bot listens for mentions of `@mybot` from the owner account and replies wit
 
 ## Setup
 - Deploy to Fly.io or similar
-- Set secrets: `BLUESKY_TOKEN`, optionally `LUMO_API_KEY`
+- Set secrets: `BLUESKY_TOKEN`
