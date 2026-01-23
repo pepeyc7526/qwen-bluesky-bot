@@ -2,7 +2,6 @@
 import os, json, datetime, asyncio, httpx
 from llama_cpp import Llama
 
-# ---------- CONFIG ----------
 BOT_HANDLE    = os.getenv("BOT_HANDLE", "bot-pepeyc7526.bsky.social")
 BOT_PASSWORD  = os.getenv("BOT_PASSWORD")
 OWNER_DID     = "did:plc:topho472iindqxv5hm7nzww2"
@@ -11,10 +10,9 @@ ELLIPSIS      = "…"
 
 MODEL_PATH = "models/Phi-3-mini-4k-instruct-q4.gguf"
 llm = Llama(model_path=MODEL_PATH, n_ctx=2048, n_threads=2, verbose=False)
-# --------------------------
 
 if not BOT_PASSWORD:
-    raise RuntimeError("BOT_PASSWORD missing – add it as a secret in GitHub Actions")
+    raise RuntimeError("BOT_PASSWORD missing")
 
 async def get_fresh_token() -> str:
     print("🔑 Requesting fresh session token...")
@@ -35,14 +33,16 @@ async def post_to_bluesky(text: str, token: str):
         "createdAt": datetime.datetime.utcnow().isoformat() + "Z"
     }
     async with httpx.AsyncClient() as client:
-        await client.post(
+        r = await client.post(
             url,
-            headers={
-                "Authorization": f"Bearer {token}",
-                "Content-Type": "application/json"
-            },
+            headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
             json=payload,
         )
+        print(f"📤 Post response: {r.status_code}")
+        if r.status_code != 200:
+            print(f"❌ Error: {r.text}")
+        else:
+            print(f"✅ Post URI: {r.json().get('uri')}")
 
 async def get_record_cid(uri: str, token: str):
     try:
@@ -62,7 +62,6 @@ async def get_post_text(uri: str, token: str) -> str:
         url = f"https://bsky.social/xrpc/com.atproto.repo.getRecord?repo={repo}&collection=app.bsky.feed.post&rkey={rkey}"
         async with httpx.AsyncClient() as client:
             r = await client.get(url, headers={"Authorization": f"Bearer {token}"})
-            r.raise_for_status()
             return r.json()["value"]["text"]
     except Exception:
         return ""
@@ -119,45 +118,29 @@ async def post_reply(text: str, reply_to_uri: str, token: str):
     async with httpx.AsyncClient() as client:
         await client.post(
             url,
-            headers={
-                "Authorization": f"Bearer {token}",
-                "Content-Type": "application/json"
-            },
+            headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
             json=payload,
         )
 
 async def main():
-    # Получаем свежий токен
     token = await get_fresh_token()
-
-    # Публикуем стартовое сообщение
     print("✅ Bot started. Posting startup message...")
-    try:
-        await post_to_bluesky("✅ Bot started", token)
-        print("✅ Startup post published!")
-    except Exception as e:
-        print(f"[ERROR] Failed to post startup message: {e}")
-
-    # Слушаем события
-    print("👂 Listening for 'check' mentions or commands from owner...")
+    await post_to_bluesky("✅ Bot started", token)
+    print("👂 Listening for 'check' mentions...")
     async for txt, uri, author_did, reply_to_uri in bluesky_stream(token):
-        print(f"📬 Received request: {txt[:50]}...")
+        print(f"📬 Received: {txt[:50]}...")
         try:
             if reply_to_uri:
                 parent_text = await get_post_text(reply_to_uri, token)
-                prompt = f"Parent post: {parent_text}\n\nUser comment: {txt}"
+                prompt = f"Parent: {parent_text}\nComment: {txt}"
             else:
-                content = txt[len("check"):].strip()
-                prompt = f"User request: {content}"
-
+                prompt = f"Request: {txt[len('check'):].strip()}"
             reply = ask_local(prompt)
             await post_reply(reply, uri, token)
-            print(f"[{datetime.datetime.utcnow()}] Replied to {uri}")
-
             await post_to_bluesky("📨 Processed a 'check' request", token)
-            print("✅ Confirmation post published!")
+            print(f"✅ Replied to {uri}")
         except Exception as e:
-            print(f"[ERROR] Failed to process {uri}: {e}")
+            print(f"[ERROR] {e}")
 
 if __name__ == "__main__":
     asyncio.run(main())
