@@ -9,7 +9,7 @@ OWNER_DID     = "did:plc:topho472iindqxv5hm7nzww2"
 MAX_LEN       = 300
 ELLIPSIS      = "…"
 
-MODEL_PATH = "models/phi-3-mini-4k-instruct-q4_k_m.gguf"
+MODEL_PATH = "models/Phi-3-mini-4k-instruct-q4.gguf"
 llm = Llama(model_path=MODEL_PATH, n_ctx=2048, n_threads=2, verbose=False)
 # --------------------------
 
