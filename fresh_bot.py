@@ -7,7 +7,6 @@ BOT_PASSWORD  = os.getenv("BOT_PASSWORD")
 BOT_DID       = "did:plc:er457dupy7iytuzdgfmfsuv7"
 OWNER_DID     = "did:plc:topho472iindqxv5hm7nzww2"
 MAX_LEN       = 300
-LAST_POST_FILE = "last_processed_post.txt"
 SEARCH_USAGE_FILE = "search_usage.json"
 
 MODEL_PATH = "models/qwen2-7b-instruct-q4_k_m.gguf"
@@ -16,7 +15,7 @@ llm = Llama(model_path=MODEL_PATH, n_ctx=2048, n_threads=2, verbose=False)
 if not BOT_PASSWORD:
     raise RuntimeError("BOT_PASSWORD missing")
 
-# === WEB SEARCH ===
+# === WEB SEARCH (same as before) ===
 async def web_search(query: str) -> str:
     api_key = os.getenv("GOOGLE_API_KEY")
     cse_id = os.getenv("GOOGLE_CSE_ID")
@@ -90,23 +89,11 @@ async def get_record_cid(uri: str, token: str):
     except Exception:
         return "bafyreihjdbd4zq4f4a5v6w5z5g5q5j5j5j5j5j5j5j5j5j5j5j5j5j5j5j5j5j"
 
-async def get_post_text(uri: str, token: str) -> str:
-    try:
-        parts = uri.split("/")
-        repo, rkey = parts[2], parts[4]
-        url = f"https://bsky.social/xrpc/com.atproto.repo.getRecord?repo={repo}&collection=app.bsky.feed.post&rkey={rkey}"
-        async with httpx.AsyncClient() as client:
-            r = await client.get(url, headers={"Authorization": f"Bearer {token}"})
-            return r.json()["value"]["text"]
-    except Exception:
-        return ""
-
-async def get_author_feed(author_did: str, token: str):
-    url = "https://bsky.social/xrpc/app.bsky.feed.getAuthorFeed"
-    params = {"actor": author_did}
+async def get_notifications(token: str):
+    url = "https://bsky.social/xrpc/app.bsky.notification.listNotifications"
     async with httpx.AsyncClient() as client:
-        r = await client.get(url, headers={"Authorization": f"Bearer {token}"}, params=params)
-        return r.json().get("feed", [])
+        r = await client.get(url, headers={"Authorization": f"Bearer {token}"})
+        return r.json().get("notifications", [])
 
 async def mark_as_read(token: str, seen_at: str):
     url = "https://bsky.social/xrpc/app.bsky.notification.updateSeen"
@@ -165,48 +152,44 @@ async def post_reply(text: str, reply_to_uri: str, token: str):
         await client.post(url, headers={"Authorization": f"Bearer {token}"}, json=payload)
 
 # === MAIN ===
-def get_last_processed_uri():
-    if os.path.exists(LAST_POST_FILE):
-        with open(LAST_POST_FILE, "r") as f:
-            return f.read().strip()
-    return None
-
-def save_last_processed_uri(uri):
-    with open(LAST_POST_FILE, "w") as f:
-        f.write(uri)
-
 async def main():
     token = await get_fresh_token()
-    print("✅ Checking only YOUR requests...")
+    print("✅ Checking notifications...")
 
     # Reset counter if new month
     if should_reset_counter():
         save_search_usage(0)
         print("📅 Search counter reset")
 
-    last_uri = get_last_processed_uri()
-    print(f"⏭️ Skipping posts before: {last_uri}")
+    notifications = await get_notifications(token)
+    print(f"📥 Found {len(notifications)} notifications")
 
-    feed = await get_author_feed(OWNER_DID, token)
-    replied_uri = None
+    replied = False
+    for notif in notifications:
+        # Пропускаем, если уже прочитано
+        if notif.get("isRead"):
+            continue
 
-    for item in feed[:10]:
-        post = item.get("post", {})
-        record = post.get("record", {})
+        # Проверяем, что уведомление от тебя
+        author_did = notif.get("author", {}).get("did", "")
+        if author_did != OWNER_DID:
+            continue
+
+        # Проверяем тип
+        if notif.get("reason") != "mention":
+            continue
+
+        record = notif.get("record", {})
         if record.get("$type") != "app.bsky.feed.post":
             continue
 
-        uri = post.get("uri", "")
+        txt = record.get("text", "")
+        uri = notif.get("uri", "")
+
         if not uri:
             continue
 
-        if last_uri and uri == last_uri:
-            break
-
-        txt = record.get("text", "")
         clean_txt = txt.strip()
-
-        replied = False
 
         # === ai web ... ===
         if clean_txt.lower().startswith("ai web "):
@@ -223,7 +206,6 @@ async def main():
                     save_search_usage(usage["count"] + 1)
                 await post_reply(reply, uri, token)
                 print(f"✅ Replied (web) to {uri}")
-                replied_uri = uri
                 replied = True
 
         # === ai ... ===
@@ -233,28 +215,16 @@ async def main():
                 reply = ask_local(f"Question: {content}")
                 await post_reply(reply, uri, token)
                 print(f"✅ Replied (local) to {uri}")
-                replied_uri = uri
                 replied = True
 
-        # === @bot ... ===
-        elif clean_txt.startswith("@bot-pepeyc7526.bsky.social"):
-            content = clean_txt[len("@bot-pepeyc7526.bsky.social"):].strip()
-            if content:
-                reply = ask_local(f"Question: {content}")
-                await post_reply(reply, uri, token)
-                print(f"✅ Replied (mention) to {uri}")
-                replied_uri = uri
-                replied = True
-
+        # После ответа — помечаем как прочитанное
         if replied:
             break
 
-    if replied_uri:
-        save_last_processed_uri(replied_uri)
-
+    # Помечаем всё как прочитанное
     seen_at = datetime.datetime.utcnow().isoformat() + "Z"
     await mark_as_read(token, seen_at)
-    print("✅ Done")
+    print("✅ All notifications marked as read")
 
 if __name__ == "__main__":
     asyncio.run(main())
