@@ -1,4 +1,4 @@
-name: Fresh Fact-Check Bot
+name: Fact-Check Bot
 
 on:
   schedule:
@@ -23,12 +23,20 @@ jobs:
       - name: Run bot
         env:
           BLUESKY_TOKEN: ${{ secrets.BLUESKY_TOKEN }}
-        run: python fresh_bot.py
+        run: python bot.py
+
+      - name: Configure git
+        run: |
+          cat <<EOF > ~/.gitconfig
+          [user]
+            name = github-actions
+            email = github-actions@users.noreply.github.com
+          EOF
+          git config --global user.name "github-actions"
+          git config --global user.email "github-actions@users.noreply.github.com"
 
       - name: Commit updated state (if changed)
         run: |
-          git config --global user.name "github-actions[bot]"
-          git config --global user.email "github-actions[bot]@users.noreply.github.com"
           git add state.json
           if [ -n "$(git status --porcelain)" ]; then
             git commit -m "Update last processed URI"
