@@ -81,13 +81,18 @@ async def bluesky_stream(token: str):
                 try: ev = json.loads(line)
                 except: continue
                 if ev.get("$type") != "com.atproto.sync.subscribeRepos#commit": continue
+                
+                # 🔍 ЛОГ: кто прислал коммит
+                repo_did = ev.get("repo", "")
+                print(f"📥 Commit from: {repo_did}")
+
                 for op in ev.get("ops", []):
                     if op.get("action") != "create" or "post" not in op.get("path", ""): continue
                     rec = op.get("payload", {})
                     if rec.get("$type") != "app.bsky.feed.post": continue
                     txt = rec.get("text", "")
                     uri = rec.get("uri", "")
-                    author_did = ev.get("repo", "")
+                    author_did = repo_did  # автор = repo DID
 
                     reply_to_uri = None
                     if "reply" in rec and "parent" in rec["reply"]:
@@ -95,6 +100,10 @@ async def bluesky_stream(token: str):
 
                     mentioned = f"@{BOT_HANDLE}" in txt.lower()
                     from_owner = (author_did == OWNER_DID)
+                    
+                    # 🔍 ЛОГ: каждый пост
+                    print(f"📬 Post: '{txt[:50]}...' | Author: {author_did} | Mentioned: {mentioned} | From owner: {from_owner}")
+
                     if not (mentioned or from_owner): continue
                     if not txt.lower().strip().startswith("ai"): continue
 
@@ -140,7 +149,7 @@ async def main():
     await post_to_bluesky("✅ Bot started", token)
     print("👂 Listening for 'ai' mentions or commands from owner...")
     async for txt, uri, author_did, reply_to_uri in bluesky_stream(token):
-        print(f"📬 Received: {txt[:50]}...")
+        print(f"🎯 MATCHED request: {txt[:50]}...")
         try:
             if reply_to_uri:
                 parent_text = await get_post_text(reply_to_uri, token)
