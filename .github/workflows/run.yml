@@ -1,4 +1,4 @@
-name: Fact-Check Bot
+name: Fresh Fact-Check Bot
 
 on:
   schedule:
@@ -23,7 +23,7 @@ jobs:
       - name: Run bot
         env:
           BLUESKY_TOKEN: ${{ secrets.BLUESKY_TOKEN }}
-        run: python bot.py
+        run: python fresh_bot.py
 
       - name: Commit updated state (if changed)
         run: |
