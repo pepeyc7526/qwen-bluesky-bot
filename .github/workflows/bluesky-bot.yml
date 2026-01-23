@@ -61,3 +61,12 @@ jobs:
           GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
           GOOGLE_CSE_ID: ${{ secrets.GOOGLE_CSE_ID }}
         run: python fresh_bot.py
+
+      # 👇 ДОБАВЬ ЭТОТ БЛОК 👇
+      - name: Commit search_usage.json (if changed)
+        run: |
+          if [ -f "search_usage.json" ]; then
+            git add search_usage.json
+            git diff --cached --quiet || git commit -m "Update search usage counter"
+            git push
+          fi
