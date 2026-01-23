@@ -125,9 +125,9 @@ async def main():
             continue
 
         # Проверяем, не отвечали ли уже
-        if notif.get("isRead"):
-            print(f"⏭️ Already read: {uri}")
-            continue
+        #if notif.get("isRead"):
+        #    print(f"⏭️ Already read: {uri}")
+        #    continue
 
         print(f"🎯 Processing: {txt[:50]}...")
         try:
