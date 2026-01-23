@@ -116,7 +116,11 @@ async def main():
             continue
 
         txt = record.get("text", "")
-        uri = record.get("uri", "")
+        uri = notif.get("uri", "")  # ← КЛЮЧЕВОЕ ИЗМЕНЕНИЕ
+
+        if not uri:
+            print("   ⚠️ Skipped: no URI")
+            continue
 
         # Удаляем упоминание бота из текста
         clean_txt = txt
@@ -124,7 +128,6 @@ async def main():
         if clean_txt.startswith(bot_mention):
             clean_txt = clean_txt[len(bot_mention):].strip()
 
-        # Пропускаем пустые запросы
         if not clean_txt:
             continue
 
