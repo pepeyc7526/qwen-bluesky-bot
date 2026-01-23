@@ -58,12 +58,6 @@ async def get_post_text(uri: str, token: str) -> str:
     except Exception:
         return ""
 
-async def get_notifications(token: str):
-    url = "https://bsky.social/xrpc/app.bsky.notification.listNotifications"
-    async with httpx.AsyncClient() as client:
-        r = await client.get(url, headers={"Authorization": f"Bearer {token}"})
-        return r.json().get("notifications", [])
-
 async def get_author_feed(author_did: str, token: str):
     url = "https://bsky.social/xrpc/app.bsky.feed.getAuthorFeed"
     params = {"actor": author_did}
@@ -109,52 +103,9 @@ async def post_reply(text: str, reply_to_uri: str, token: str):
 
 async def main():
     token = await get_fresh_token()
-    print("✅ Checking for mentions and owner posts...")
+    print("✅ Checking only YOUR requests...")
 
-    # 1. Проверяем уведомления
-    notifications = await get_notifications(token)
-    print(f"📥 Found {len(notifications)} notifications")
-
-    for notif in notifications:
-        if notif.get("reason") != "mention":
-            continue
-
-        record = notif.get("record", {})
-        if record.get("$type") != "app.bsky.feed.post":
-            continue
-
-        txt = record.get("text", "")
-        uri = notif.get("uri", "")
-
-        if not uri:
-            continue
-
-        clean_txt = txt
-        bot_mention = "@bot-pepeyc7526.bsky.social"
-        if clean_txt.startswith(bot_mention):
-            clean_txt = clean_txt[len(bot_mention):].strip()
-
-        if not clean_txt:
-            continue
-
-        print(f"🎯 Processing mention: {clean_txt[:50]}...")
-        try:
-            parent_text = ""
-            if "reply" in record and "parent" in record["reply"]:
-                parent_uri = record["reply"]["parent"]["uri"]
-                parent_text = await get_post_text(parent_uri, token)
-                prompt = f"Parent post: {parent_text}\nUser question: {clean_txt}"
-            else:
-                prompt = f"User question: {clean_txt}"
-
-            reply = ask_local(prompt)
-            await post_reply(reply, uri, token)
-            print(f"✅ Replied to {uri}")
-        except Exception as e:
-            print(f"[ERROR] {e}")
-
-    # 2. Проверяем последние посты владельца
-    print("🔍 Checking owner's recent posts...")
+    # Читаем только твои посты
     feed = await get_author_feed(OWNER_DID, token)
     for item in feed[:5]:  # последние 5 постов
         post = item.get("post", {})
@@ -165,18 +116,33 @@ async def main():
         txt = record.get("text", "")
         uri = post.get("uri", "")
 
-        # Пропускаем, если уже отвечали (можно улучшить)
-        if not txt or txt.startswith("✅") or txt.startswith("📨"):
-            continue
+        clean_txt = txt.strip()
+        replied = False
 
-        print(f"👤 Owner post: {txt[:50]}...")
-        try:
-            prompt = f"User question: {txt}"
-            reply = ask_local(prompt)
-            await post_reply(reply, uri, token)
-            print(f"✅ Replied to owner post {uri}")
-        except Exception as e:
-            print(f"[ERROR] {e}")
+        # Вариант 1: начинается с "ai"
+        if clean_txt.lower().startswith("ai"):
+            content = clean_txt[2:].strip()
+            if content:
+                print(f"👤 'ai' request: {content[:50]}...")
+                prompt = f"User request: {content}"
+                reply = ask_local(prompt)
+                await post_reply(reply, uri, token)
+                print(f"✅ Replied to {uri}")
+                replied = True
+
+        # Вариант 2: начинается с упоминания бота
+        elif clean_txt.startswith("@bot-pepeyc7526.bsky.social"):
+            content = clean_txt[len("@bot-pepeyc7526.bsky.social"):].strip()
+            if content:
+                print(f"👤 '@bot' request: {content[:50]}...")
+                prompt = f"User request: {content}"
+                reply = ask_local(prompt)
+                await post_reply(reply, uri, token)
+                print(f"✅ Replied to {uri}")
+                replied = True
+
+        if replied:
+            break  # отвечаем только на самый свежий запрос
 
     seen_at = datetime.datetime.utcnow().isoformat() + "Z"
     await mark_as_read(token, seen_at)
