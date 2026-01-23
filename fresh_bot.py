@@ -110,7 +110,7 @@ async def post_reply(text: str, reply_to_uri: str):
 
 async def main():
     async for txt, uri, author_did in bluesky_stream():
-        content = txt[len("check"):].strip()
+        content = txt[len("lumo"):].strip()
         if not content:
             continue
 
