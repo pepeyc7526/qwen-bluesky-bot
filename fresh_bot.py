@@ -16,15 +16,11 @@ if not BOT_PASSWORD:
     raise RuntimeError("BOT_PASSWORD missing")
 
 async def get_fresh_token() -> str:
-    print("🔑 Requesting fresh session token...")
     url = "https://bsky.social/xrpc/com.atproto.server.createSession"
     payload = {"identifier": BOT_HANDLE, "password": BOT_PASSWORD}
     async with httpx.AsyncClient() as client:
-        r = await client.post(url, json=payload, timeout=10.0)
-        r.raise_for_status()
-        data = r.json()
-        print("✅ Got fresh access token")
-        return data["accessJwt"]
+        r = await client.post(url, json=payload)
+        return r.json()["accessJwt"]
 
 async def post_to_bluesky(text: str, token: str):
     url = "https://bsky.social/xrpc/com.atproto.repo.createRecord"
@@ -38,16 +34,7 @@ async def post_to_bluesky(text: str, token: str):
         }
     }
     async with httpx.AsyncClient() as client:
-        r = await client.post(
-            url,
-            headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
-            json=payload,
-        )
-        print(f"📤 Post response: {r.status_code}")
-        if r.status_code != 200:
-            print(f"❌ Error: {r.text}")
-        else:
-            print(f"✅ Post URI: {r.json().get('uri')}")
+        await client.post(url, headers={"Authorization": f"Bearer {token}"}, json=payload)
 
 async def get_record_cid(uri: str, token: str):
     try:
@@ -71,43 +58,17 @@ async def get_post_text(uri: str, token: str) -> str:
     except Exception:
         return ""
 
-async def bluesky_stream(token: str):
-    print("📡 Connecting to Bluesky event stream...")
-    url = "https://bsky.social/xrpc/com.atproto.sync.subscribeRepos"
-    async with httpx.AsyncClient(timeout=None) as client:
-        async with client.stream("GET", url, headers={"Authorization": f"Bearer {token}"}) as resp:
-            async for line in resp.aiter_lines():
-                if not line.strip(): continue
-                try: ev = json.loads(line)
-                except: continue
-                if ev.get("$type") != "com.atproto.sync.subscribeRepos#commit": continue
-                
-                # 🔍 ЛОГ: кто прислал коммит
-                repo_did = ev.get("repo", "")
-                print(f"📥 Commit from: {repo_did}")
+async def get_notifications(token: str):
+    url = "https://bsky.social/xrpc/app.bsky.notification.listNotifications"
+    async with httpx.AsyncClient() as client:
+        r = await client.get(url, headers={"Authorization": f"Bearer {token}"})
+        return r.json().get("notifications", [])
 
-                for op in ev.get("ops", []):
-                    if op.get("action") != "create" or "post" not in op.get("path", ""): continue
-                    rec = op.get("payload", {})
-                    if rec.get("$type") != "app.bsky.feed.post": continue
-                    txt = rec.get("text", "")
-                    uri = rec.get("uri", "")
-                    author_did = repo_did  # автор = repo DID
-
-                    reply_to_uri = None
-                    if "reply" in rec and "parent" in rec["reply"]:
-                        reply_to_uri = rec["reply"]["parent"]["uri"]
-
-                    mentioned = f"@{BOT_HANDLE}" in txt.lower()
-                    from_owner = (author_did == OWNER_DID)
-                    
-                    # 🔍 ЛОГ: каждый пост
-                    print(f"📬 Post: '{txt[:50]}...' | Author: {author_did} | Mentioned: {mentioned} | From owner: {from_owner}")
-
-                    if not (mentioned or from_owner): continue
-                    if not txt.lower().strip().startswith("ai"): continue
-
-                    yield txt, uri, author_did, reply_to_uri
+async def mark_as_read(token: str, seen_at: str):
+    url = "https://bsky.social/xrpc/app.bsky.notification.updateSeen"
+    payload = {"seenAt": seen_at}
+    async with httpx.AsyncClient() as client:
+        await client.post(url, headers={"Authorization": f"Bearer {token}"}, json=payload)
 
 def ask_local(prompt: str) -> str:
     full_prompt = (
@@ -137,22 +98,43 @@ async def post_reply(text: str, reply_to_uri: str, token: str):
         }
     }
     async with httpx.AsyncClient() as client:
-        await client.post(
-            url,
-            headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
-            json=payload,
-        )
+        await client.post(url, headers={"Authorization": f"Bearer {token}"}, json=payload)
 
 async def main():
     token = await get_fresh_token()
-    print("✅ Bot started. Posting startup message...")
-    await post_to_bluesky("✅ Bot started", token)
-    print("👂 Listening for 'ai' mentions or commands from owner...")
-    async for txt, uri, author_did, reply_to_uri in bluesky_stream(token):
-        print(f"🎯 MATCHED request: {txt[:50]}...")
+    print("✅ Checking for new 'ai' mentions...")
+
+    # Публикуем старт (опционально — можно убрать)
+    # await post_to_bluesky("✅ Bot check-in", token)
+
+    notifications = await get_notifications(token)
+    print(f"📥 Found {len(notifications)} notifications")
+
+    for notif in notifications:
+        if notif.get("reason") != "mention":
+            continue
+
+        record = notif.get("record", {})
+        if record.get("$type") != "app.bsky.feed.post":
+            continue
+
+        txt = record.get("text", "")
+        uri = record.get("uri", "")
+
+        if not txt.lower().strip().startswith("ai"):
+            continue
+
+        # Проверяем, не отвечали ли уже
+        if notif.get("isRead"):
+            print(f"⏭️ Already read: {uri}")
+            continue
+
+        print(f"🎯 Processing: {txt[:50]}...")
         try:
-            if reply_to_uri:
-                parent_text = await get_post_text(reply_to_uri, token)
+            parent_text = ""
+            if "reply" in record and "parent" in record["reply"]:
+                parent_uri = record["reply"]["parent"]["uri"]
+                parent_text = await get_post_text(parent_uri, token)
                 prompt = f"Parent: {parent_text}\nComment: {txt}"
             else:
                 content = txt[len("ai"):].strip()
@@ -160,10 +142,15 @@ async def main():
 
             reply = ask_local(prompt)
             await post_reply(reply, uri, token)
-            await post_to_bluesky("📨 Processed an 'ai' request", token)
             print(f"✅ Replied to {uri}")
+
         except Exception as e:
             print(f"[ERROR] {e}")
+
+    # Помечаем всё как прочитанное
+    seen_at = datetime.datetime.utcnow().isoformat() + "Z"
+    await mark_as_read(token, seen_at)
+    print("✅ All notifications marked as read")
 
 if __name__ == "__main__":
     asyncio.run(main())
