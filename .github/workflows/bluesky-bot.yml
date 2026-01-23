@@ -1,0 +1,51 @@
+name: Bluesky Fact Bot
+
+on:
+  schedule:
+    - cron: '*/15 * * * *'
+  workflow_dispatch:
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 9
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential
+
+      - name: Install Python dependencies
+        run: |
+          pip install httpx llama-cpp-python
+
+      - name: Download Phi-3 Mini GGUF model
+        run: |
+          mkdir -p models
+          cd models
+          if [ ! -f "Phi-3-mini-4k-instruct-q4.gguf" ]; then
+            echo "Downloading Phi-3 Mini (Q4)..."
+            curl -L --retry 3 --user-agent "GitHub-Actions" \
+              -o "Phi-3-mini-4k-instruct-q4.gguf" \
+              "https://huggingface.co/microsoft/Phi-3-mini-4k-instruct-gguf/resolve/main/Phi-3-mini-4k-instruct-q4.gguf?download=true"
+          fi
+          ls -lh
+
+      - name: Verify model exists
+        run: |
+          if [ ! -f "models/Phi-3-mini-4k-instruct-q4.gguf" ]; then
+            echo "ERROR: Model not found!"
+            exit 1
+          fi
+
+      - name: Run bot
+        env:
+          BLUESKY_TOKEN: ${{ secrets.BLUESKY_TOKEN }}
+        run: python fresh_bot.py
