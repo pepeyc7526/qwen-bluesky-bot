@@ -102,7 +102,7 @@ async def post_reply(text: str, reply_to_uri: str, token: str):
 
 async def main():
     token = await get_fresh_token()
-    print("✅ Checking for new 'ai' mentions...")
+    print("✅ Checking for mentions...")
 
     notifications = await get_notifications(token)
     print(f"📥 Found {len(notifications)} notifications")
@@ -118,29 +118,25 @@ async def main():
         txt = record.get("text", "")
         uri = record.get("uri", "")
 
-        # Очистка от упоминания
-        clean_txt = txt.lower().strip()
-        bot_mention = f"@{BOT_HANDLE.lower()}"
+        # Удаляем упоминание бота из текста
+        clean_txt = txt
+        bot_mention = "@bot-pepeyc7526.bsky.social"
         if clean_txt.startswith(bot_mention):
             clean_txt = clean_txt[len(bot_mention):].strip()
 
-        if not clean_txt.startswith("ai"):
+        # Пропускаем пустые запросы
+        if not clean_txt:
             continue
 
-        # Пропускаем, если уже обработано (опционально)
-        # if notif.get("isRead"):
-        #     continue
-
-        print(f"🎯 Processing: {txt[:50]}...")
+        print(f"🎯 Processing: {clean_txt[:50]}...")
         try:
             parent_text = ""
             if "reply" in record and "parent" in record["reply"]:
                 parent_uri = record["reply"]["parent"]["uri"]
                 parent_text = await get_post_text(parent_uri, token)
-                prompt = f"Parent: {parent_text}\nComment: {txt}"
+                prompt = f"Parent post: {parent_text}\nUser question: {clean_txt}"
             else:
-                content = clean_txt[len("ai"):].strip()
-                prompt = f"User request: {content}"
+                prompt = f"User question: {clean_txt}"
 
             reply = ask_local(prompt)
             await post_reply(reply, uri, token)
