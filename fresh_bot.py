@@ -7,13 +7,25 @@ BOT_PASSWORD  = os.getenv("BOT_PASSWORD")
 BOT_DID       = "did:plc:er457dupy7iytuzdgfmfsuv7"
 OWNER_DID     = "did:plc:topho472iindqxv5hm7nzww2"
 MAX_LEN       = 300
-ELLIPSIS      = "…"
+LAST_POST_FILE = "last_processed_post.txt"
 
-MODEL_PATH = "models/Phi-3-mini-4k-instruct-q4.gguf"
+MODEL_PATH = "models/qwen2-7b-instruct-q4_k_m.gguf"
 llm = Llama(model_path=MODEL_PATH, n_ctx=2048, n_threads=2, verbose=False)
 
 if not BOT_PASSWORD:
     raise RuntimeError("BOT_PASSWORD missing")
+
+# Читаем последний обработанный URI
+def get_last_processed_uri():
+    if os.path.exists(LAST_POST_FILE):
+        with open(LAST_POST_FILE, "r") as f:
+            return f.read().strip()
+    return None
+
+# Сохраняем URI
+def save_last_processed_uri(uri):
+    with open(LAST_POST_FILE, "w") as f:
+        f.write(uri)
 
 async def get_fresh_token() -> str:
     url = "https://bsky.social/xrpc/com.atproto.server.createSession"
@@ -72,15 +84,35 @@ async def mark_as_read(token: str, seen_at: str):
         await client.post(url, headers={"Authorization": f"Bearer {token}"}, json=payload)
 
 def ask_local(prompt: str) -> str:
-    full_prompt = (
-        "<|user|>\nProvide a concise answer or fact-check based on the context. "
-        "Respond in under 300 characters, without links or emojis.\n\n"
-        f"{prompt}\n<|end|>\n<|assistant|>\n"
+    messages = [
+        {"role": "system", "content": "You are a helpful AI assistant. Give short, clear answers under 300 characters. Never use links or emojis."},
+        {"role": "user", "content": prompt}
+    ]
+    
+    full_prompt = ""
+    for msg in messages:
+        if msg["role"] == "user":
+            full_prompt += f"<|im_start|>user\n{msg['content']}<|im_end|>>\n"
+        elif msg["role"] == "assistant":
+            full_prompt += f"<|im_start|>assistant\n{msg['content']}<|im_end|>>\n"
+        else:
+            full_prompt += f"<|im_start|>system\n{msg['content']}<|im_end|>>\n"
+    full_prompt += "<|im_start|>assistant\n"
+
+    out = llm(
+        full_prompt,
+        max_tokens=120,
+        stop=["<|im_end|>", "<|im_start|>"],
+        echo=False,
+        temperature=0.3
     )
-    out = llm(full_prompt, max_tokens=100, stop=["<|end|>", "<|user|>"], echo=False, temperature=0.3)
     ans = out["choices"][0]["text"].strip()
     ans = " ".join(ans.split())
-    return ans[:MAX_LEN - len(ELLIPSIS)] + ELLIPSIS if len(ans) > MAX_LEN else ans
+
+    if any(w in ans.lower() for w in ["don't know", "unclear", "provide more", "doesn't seem", "not recognized"]):
+        ans = "🤔 Not sure what you mean. Try rephrasing!"
+
+    return ans[:MAX_LEN] if len(ans) > MAX_LEN else ans
 
 async def post_reply(text: str, reply_to_uri: str, token: str):
     cid = await get_record_cid(reply_to_uri, token)
@@ -105,21 +137,31 @@ async def main():
     token = await get_fresh_token()
     print("✅ Checking only YOUR requests...")
 
-    # Читаем только твои посты
+    last_uri = get_last_processed_uri()
+    print(f"⏭️ Skipping posts before: {last_uri}")
+
     feed = await get_author_feed(OWNER_DID, token)
-    for item in feed[:5]:  # последние 5 постов
+    replied_uri = None
+
+    for item in feed[:10]:  # проверяем больше постов на всякий
         post = item.get("post", {})
         record = post.get("record", {})
         if record.get("$type") != "app.bsky.feed.post":
             continue
 
-        txt = record.get("text", "")
         uri = post.get("uri", "")
+        if not uri:
+            continue
 
+        # Пропускаем уже обработанные
+        if last_uri and uri == last_uri:
+            break
+
+        txt = record.get("text", "")
         clean_txt = txt.strip()
+
         replied = False
 
-        # Вариант 1: начинается с "ai"
         if clean_txt.lower().startswith("ai"):
             content = clean_txt[2:].strip()
             if content:
@@ -128,9 +170,9 @@ async def main():
                 reply = ask_local(prompt)
                 await post_reply(reply, uri, token)
                 print(f"✅ Replied to {uri}")
+                replied_uri = uri
                 replied = True
 
-        # Вариант 2: начинается с упоминания бота
         elif clean_txt.startswith("@bot-pepeyc7526.bsky.social"):
             content = clean_txt[len("@bot-pepeyc7526.bsky.social"):].strip()
             if content:
@@ -139,10 +181,16 @@ async def main():
                 reply = ask_local(prompt)
                 await post_reply(reply, uri, token)
                 print(f"✅ Replied to {uri}")
+                replied_uri = uri
                 replied = True
 
         if replied:
-            break  # отвечаем только на самый свежий запрос
+            break  # только один ответ за запуск
+
+    # Сохраняем последний обработанный URI
+    if replied_uri:
+        save_last_processed_uri(replied_uri)
+        print(f"💾 Saved last processed URI")
 
     seen_at = datetime.datetime.utcnow().isoformat() + "Z"
     await mark_as_read(token, seen_at)
