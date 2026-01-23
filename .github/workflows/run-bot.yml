@@ -27,10 +27,10 @@ jobs:
 
       - name: Commit updated state (if changed)
         run: |
-          git config --global user.name "github-actions[bot]"
-          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git config --global user.name 'github-actions[bot]'
+          git config --global user.email 'github-actions[bot]@users.noreply.github.com'
           git add state.json
           if [ -n "$(git status --porcelain)" ]; then
-            git commit -m "Update last processed URI"
+            git commit -m 'Update last processed URI'
             git push
           fi
