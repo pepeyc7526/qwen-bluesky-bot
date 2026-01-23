@@ -96,7 +96,7 @@ async def bluesky_stream(token: str):
                     mentioned = f"@{BOT_HANDLE}" in txt.lower()
                     from_owner = (author_did == OWNER_DID)
                     if not (mentioned or from_owner): continue
-                    if not txt.lower().strip().startswith("check"): continue
+                    if not txt.lower().strip().startswith("ai"): continue
 
                     yield txt, uri, author_did, reply_to_uri
 
@@ -138,7 +138,7 @@ async def main():
     token = await get_fresh_token()
     print("✅ Bot started. Posting startup message...")
     await post_to_bluesky("✅ Bot started", token)
-    print("👂 Listening for 'check' mentions...")
+    print("👂 Listening for 'ai' mentions or commands from owner...")
     async for txt, uri, author_did, reply_to_uri in bluesky_stream(token):
         print(f"📬 Received: {txt[:50]}...")
         try:
@@ -146,10 +146,12 @@ async def main():
                 parent_text = await get_post_text(reply_to_uri, token)
                 prompt = f"Parent: {parent_text}\nComment: {txt}"
             else:
-                prompt = f"Request: {txt[len('check'):].strip()}"
+                content = txt[len("ai"):].strip()
+                prompt = f"User request: {content}"
+
             reply = ask_local(prompt)
             await post_reply(reply, uri, token)
-            await post_to_bluesky("📨 Processed a 'check' request", token)
+            await post_to_bluesky("📨 Processed an 'ai' request", token)
             print(f"✅ Replied to {uri}")
         except Exception as e:
             print(f"[ERROR] {e}")
