@@ -1,0 +1,38 @@
+name: Bluesky Fact Bot
+
+on:
+  schedule:
+    - cron: '*/15 * * * *'  # every 15 minutes
+  workflow_dispatch:
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 9
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install system deps (for llama-cpp)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential
+
+      - name: Install Python deps
+        run: |
+          pip install -r requirements.txt
+
+      - name: Download Phi-3 Mini GGUF model
+        run: |
+          mkdir -p models
+          curl -L https://huggingface.co/microsoft/Phi-3-mini-4k-instruct-gguf/resolve/main/phi-3-mini-4k-instruct-q4_k_m.gguf \
+            -o models/phi-3-mini-4k-instruct-q4_k_m.gguf
+
+      - name: Run bot
+        env:
+          BLUESKY_TOKEN: ${{ secrets.BLUESKY_TOKEN }}
+        run: python fresh_bot.py
