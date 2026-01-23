@@ -104,32 +104,38 @@ async def main():
     token = await get_fresh_token()
     print("✅ Checking for new 'ai' mentions...")
 
-    # Публикуем старт (опционально — можно убрать)
-    # await post_to_bluesky("✅ Bot check-in", token)
-
     notifications = await get_notifications(token)
     print(f"📥 Found {len(notifications)} notifications")
 
-    for notif in notifications:
-        if notif.get("reason") != "mention":
-            continue
-
+    for i, notif in enumerate(notifications):
+        print(f"\n🔍 Notification {i+1}:")
+        print(f"   Reason: {notif.get('reason')}")
+        print(f"   Is Read: {notif.get('isRead')}")
         record = notif.get("record", {})
-        if record.get("$type") != "app.bsky.feed.post":
+        print(f"   Record type: {record.get('$type')}")
+        txt = record.get("text", "")
+        print(f"   Text: '{txt}'")
+        uri = record.get("uri", "")
+        print(f"   URI: {uri}")
+
+        if notif.get("reason") != "mention":
+            print("   ➡️ Skipped: not a mention")
             continue
 
-        txt = record.get("text", "")
-        uri = record.get("uri", "")
+        if record.get("$type") != "app.bsky.feed.post":
+            print("   ➡️ Skipped: not a post")
+            continue
 
         if not txt.lower().strip().startswith("ai"):
+            print("   ➡️ Skipped: doesn't start with 'ai'")
             continue
 
-        # Проверяем, не отвечали ли уже
-        #if notif.get("isRead"):
-        #    print(f"⏭️ Already read: {uri}")
-        #    continue
+        # Временно отключаем isRead
+        # if notif.get("isRead"):
+        #     print("   ➡️ Skipped: already read")
+        #     continue
 
-        print(f"🎯 Processing: {txt[:50]}...")
+        print(f"🎯 MATCH! Processing: {txt[:50]}...")
         try:
             parent_text = ""
             if "reply" in record and "parent" in record["reply"]:
@@ -147,10 +153,9 @@ async def main():
         except Exception as e:
             print(f"[ERROR] {e}")
 
-    # Помечаем всё как прочитанное
     seen_at = datetime.datetime.utcnow().isoformat() + "Z"
     await mark_as_read(token, seen_at)
-    print("✅ All notifications marked as read")
+    print("\n✅ All notifications marked as read")
 
 if __name__ == "__main__":
     asyncio.run(main())
