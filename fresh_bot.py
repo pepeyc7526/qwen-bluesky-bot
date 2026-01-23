@@ -4,6 +4,7 @@ from llama_cpp import Llama
 
 BOT_HANDLE    = os.getenv("BOT_HANDLE", "bot-pepeyc7526.bsky.social")
 BOT_PASSWORD  = os.getenv("BOT_PASSWORD")
+BOT_DID       = "did:plc:er457dupy7iytuzdgfmfsuv7"  # ← фиксированный DID бота
 OWNER_DID     = "did:plc:topho472iindqxv5hm7nzww2"
 MAX_LEN       = 300
 ELLIPSIS      = "…"
@@ -28,6 +29,7 @@ async def get_fresh_token() -> str:
 async def post_to_bluesky(text: str, token: str):
     url = "https://bsky.social/xrpc/com.atproto.repo.createRecord"
     payload = {
+        "repo": BOT_DID,  # ← ОБЯЗАТЕЛЬНО
         "$type": "app.bsky.feed.post",
         "text": text,
         "createdAt": datetime.datetime.utcnow().isoformat() + "Z"
@@ -110,6 +112,7 @@ async def post_reply(text: str, reply_to_uri: str, token: str):
     cid = await get_record_cid(reply_to_uri, token)
     url = "https://bsky.social/xrpc/com.atproto.repo.createRecord"
     payload = {
+        "repo": BOT_DID,  # ← ОБЯЗАТЕЛЬНО
         "$type": "app.bsky.feed.post",
         "text": text,
         "reply": {"root": {"uri": reply_to_uri, "cid": cid}, "parent": {"uri": reply_to_uri, "cid": cid}},
