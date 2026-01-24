@@ -71,11 +71,16 @@ jobs:
           GOOGLE_CSE_ID: ${{ secrets.GOOGLE_CSE_ID }}
         run: python fresh_bot.py
 
-      # Commit search usage counter back to repo (for quota tracking)
+      # Commit search_usage.json back to repo (for quota tracking)
       - name: Commit search_usage.json (if changed)
         run: |
           if [ -f "search_usage.json" ]; then
             git add search_usage.json
-            git diff --cached --quiet || git commit -m "Update search usage counter"
-            git push
+            if ! git diff --cached --quiet; then
+              git config user.email "actions@github.com"
+              git config user.name "GitHub Actions"
+              git pull --rebase origin main
+              git commit -m "Update search usage counter"
+              git push
+            fi
           fi
