@@ -2,50 +2,18 @@
 import os, json, datetime, asyncio, httpx, random
 from llama_cpp import Llama
 
-# Load all config from environment variables
 BOT_HANDLE    = os.getenv("BOT_HANDLE")
 BOT_PASSWORD  = os.getenv("BOT_PASSWORD")
 BOT_DID       = os.getenv("BOT_DID")
 OWNER_DID     = os.getenv("OWNER_DID")
 MAX_LEN       = 300
 SEARCH_USAGE_FILE = "search_usage.json"
-PROCESSED_NOTIF_KEYS_FILE = "processed_notif_keys.json"
 
-# Validate required environment variables
 if not all([BOT_HANDLE, BOT_PASSWORD, BOT_DID, OWNER_DID]):
     raise RuntimeError("Missing required env vars: BOT_HANDLE, BOT_PASSWORD, BOT_DID, OWNER_DID")
 
 MODEL_PATH = "models/qwen2-7b-instruct-q4_k_m.gguf"
 llm = Llama(model_path=MODEL_PATH, n_ctx=2048, n_threads=2, verbose=False)
-
-def load_processed_notif_keys():
-    if os.path.exists(PROCESSED_NOTIF_KEYS_FILE):
-        with open(PROCESSED_NOTIF_KEYS_FILE, "r") as f:
-            return set(json.load(f))
-    return set()
-
-def save_processed_notif_keys(keys):
-    with open(PROCESSED_NOTIF_KEYS_FILE, "w") as f:
-        json.dump(list(keys), f)
-
-# === WEB SEARCH ===
-async def web_search(query: str) -> str:
-    api_key = os.getenv("GOOGLE_API_KEY")
-    cse_id = os.getenv("GOOGLE_CSE_ID")
-    if not api_key or not cse_id:
-        return ""
-    url = "https://www.googleapis.com/customsearch/v1"
-    params = {"key": api_key, "cx": cse_id, "q": query, "num": 2}
-    async with httpx.AsyncClient() as client:
-        try:
-            r = await client.get(url, params=params, timeout=10.0)
-            data = r.json()
-            results = data.get("items", [])
-            snippets = [f"{item['title']}: {item['snippet']}" for item in results]
-            return " | ".join(snippets[:2])
-        except Exception as e:
-            print(f"[SEARCH ERROR] {e}")
-            return ""
 
 def load_search_usage():
     if os.path.exists(SEARCH_USAGE_FILE):
@@ -63,7 +31,6 @@ def should_reset_counter():
     current_month = datetime.datetime.now().month
     return usage["month"] != current_month
 
-# === BLUESKY AUTHENTICATION ===
 async def get_fresh_token() -> str:
     url = "https://bsky.social/xrpc/com.atproto.server.createSession"
     payload = {"identifier": BOT_HANDLE, "password": BOT_PASSWORD}
@@ -71,8 +38,18 @@ async def get_fresh_token() -> str:
         r = await client.post(url, json=payload)
         return r.json()["accessJwt"]
 
-# === POSTING FUNCTIONS ===
-async def post_to_bluesky(text: str, token: str):
+async def post_reply(text: str, reply_to_uri: str, token: str):
+    try:
+        parts = reply_to_uri.split("/")
+        repo, collection, rkey = parts[2], parts[3], parts[4]
+        url = f"https://bsky.social/xrpc/com.atproto.repo.getRecord?repo={repo}&collection={collection}&rkey={rkey}"
+        async with httpx.AsyncClient() as client:
+            r = await client.get(url, headers={"Authorization": f"Bearer {token}"})
+            cid = r.json()["cid"]
+    except Exception as e:
+        print(f"[CID ERROR] {e}")
+        cid = "bafyreihjdbd4zq4f4a5v6w5z5g5q5j5j5j5j5j5j5j5j5j5j5j5j5j5j5j5j5j"
+
     url = "https://bsky.social/xrpc/com.atproto.repo.createRecord"
     payload = {
         "repo": BOT_DID,
@@ -80,31 +57,16 @@ async def post_to_bluesky(text: str, token: str):
         "record": {
             "$type": "app.bsky.feed.post",
             "text": text,
+            "reply": {
+                "root": {"uri": reply_to_uri, "cid": cid},
+                "parent": {"uri": reply_to_uri, "cid": cid}
+            },
             "createdAt": datetime.datetime.utcnow().isoformat() + "Z"
         }
     }
     async with httpx.AsyncClient() as client:
         await client.post(url, headers={"Authorization": f"Bearer {token}"}, json=payload)
 
-async def get_record_cid(uri: str, token: str):
-    try:
-        parts = uri.split("/")
-        repo, collection, rkey = parts[2], parts[3], parts[4]
-        url = f"https://bsky.social/xrpc/com.atproto.repo.getRecord?repo={repo}&collection={collection}&rkey={rkey}"
-        async with httpx.AsyncClient() as client:
-            r = await client.get(url, headers={"Authorization": f"Bearer {token}"})
-            return r.json()["cid"]
-    except Exception:
-        return "bafyreihjdbd4zq4f4a5v6w5z5g5q5j5j5j5j5j5j5j5j5j5j5j5j5j5j5j5j5j"
-
-# === NOTIFICATIONS ===
-async def get_notifications(token: str):
-    url = "https://bsky.social/xrpc/app.bsky.notification.listNotifications"
-    async with httpx.AsyncClient() as client:
-        r = await client.get(url, headers={"Authorization": f"Bearer {token}"})
-        return r.json().get("notifications", [])
-
-# === CONTEXT AWARENESS ===
 async def get_parent_post_text(uri: str, token: str) -> str:
     try:
         parts = uri.split("/")
@@ -127,7 +89,6 @@ async def get_parent_post_text(uri: str, token: str) -> str:
         print(f"[PARENT ERROR] {e}")
         return ""
 
-# === AI RESPONSE GENERATION ===
 def ask_local(prompt: str) -> str:
     messages = [
         {"role": "system", "content": "You are a helpful AI assistant. Answer briefly and clearly. Keep under 300 chars. No links or emojis."},
@@ -137,12 +98,12 @@ def ask_local(prompt: str) -> str:
     full_prompt = ""
     for msg in messages:
         if msg["role"] == "user":
-            full_prompt += "                                    <|im_start|>user\n" + msg['content'] + " <|im_end|>\n"
+            full_prompt += "  <|im_start|>user\n" + msg['content'] + "<|im_end|>\n"
         elif msg["role"] == "assistant":
-            full_prompt += "                                    <|im_start|>assistant\n" + msg['content'] + " <|im_end|>\n"
+            full_prompt += "  <|im_start|>assistant\n" + msg['content'] + "<|im_end|>\n"
         else:
-            full_prompt += "                                    <|im_start|>system\n" + msg['content'] + " <|im_end|>\n"
-    full_prompt += "                                    <|im_start|>assistant\n"
+            full_prompt += "  <|im_start|>system\n" + msg['content'] + "<|im_end|>\n"
+    full_prompt += "  <|im_start|>assistant\n"
 
     out = llm(
         full_prompt,
@@ -159,34 +120,12 @@ def ask_local(prompt: str) -> str:
 
     return ans[:MAX_LEN] if len(ans) > MAX_LEN else ans
 
-# === REPLY POSTING ===
-async def post_reply(text: str, reply_to_uri: str, token: str):
-    cid = await get_record_cid(reply_to_uri, token)
-    url = "https://bsky.social/xrpc/com.atproto.repo.createRecord"
-    payload = {
-        "repo": BOT_DID,
-        "collection": "app.bsky.feed.post",
-        "record": {
-            "$type": "app.bsky.feed.post",
-            "text": text,
-            "reply": {
-                "root": {"uri": reply_to_uri, "cid": cid},
-                "parent": {"uri": reply_to_uri, "cid": cid}
-            },
-            "createdAt": datetime.datetime.utcnow().isoformat() + "Z"
-        }
-    }
-    async with httpx.AsyncClient() as client:
-        await client.post(url, headers={"Authorization": f"Bearer {token}"}, json=payload)
-
-# === MARK AS READ ===
 async def mark_notification_as_read(token: str, seen_at: str):
     url = "https://bsky.social/xrpc/app.bsky.notification.updateSeen"
     payload = {"seenAt": seen_at}
     async with httpx.AsyncClient() as client:
         await client.post(url, headers={"Authorization": f"Bearer {token}"}, json=payload)
 
-# === MAIN LOGIC ===
 async def main():
     token = await get_fresh_token()
     print("✅ Checking notifications...")
@@ -195,94 +134,56 @@ async def main():
         save_search_usage(0)
         print("📅 Search counter reset")
 
-    processed_keys = load_processed_notif_keys()
-    new_processed = set(processed_keys)
-    print(f"💾 Loaded {len(processed_keys)} processed notification keys")
+    url = "https://bsky.social/xrpc/app.bsky.notification.listNotifications"
+    async with httpx.AsyncClient() as client:
+        r = await client.get(url, headers={"Authorization": f"Bearer {token}"})
+        notifications = r.json().get("notifications", [])
 
-    notifications = await get_notifications(token)
-    print(f"📥 Found {len(notifications)} notifications")
+    print(f"📥 Found {len(notifications)} unread notifications")
 
-    valid_notifs = []
     for notif in notifications:
-        indexed_at = notif.get("indexedAt")
         author_did = notif.get("author", {}).get("did", "")
-        reason = notif.get("reason")
-        record = notif.get("record", {})
-        txt = record.get("text", "") if record else ""
-        txt_preview = txt[:60].replace('\n', ' ') if txt else ''
-
-        print(f"\n📨 Notification indexedAt: {indexed_at or 'N/A'}")
-        print(f"   Author DID: {author_did}")
-        print(f"   Reason: {reason}")
-        print(f"   Text preview: '{txt_preview}...'")
-
-        # Skip if not from owner
         if author_did != OWNER_DID:
-            print("   ❌ Skipped: not from owner")
             continue
 
-        # Skip if not mention or reply
-        if reason not in ("mention", "reply"):
-            print("   ❌ Skipped: not mention or reply")
-            continue
-
-        # Skip if not a post
-        if record.get("$type") != "app.bsky.feed.post":
-            print("   ❌ Skipped: not a post")
-            continue
-
-        # Skip if no indexedAt
-        if not indexed_at:
-            print("   ❌ Skipped: no indexedAt")
-            continue
-
-        # Skip if already processed
-        if indexed_at in processed_keys:
-            print("   ❌ Skipped: already processed")
-            continue
-
-        valid_notifs.append((notif, indexed_at))
-
-    # Process oldest first
-    valid_notifs.sort(key=lambda x: x[0].get("indexedAt", ""))
-
-    for notif, indexed_at in valid_notifs:
-        txt = notif.get("text", "")
-        uri = notif.get("uri", "")
         reason = notif.get("reason")
-
-        clean_txt = txt.strip()
-        if not clean_txt:
-            print("   ❌ Skipped: empty text")
+        if reason not in ("mention", "reply"):
             continue
 
-        print(f"🔍 Cleaned text: '{clean_txt}'")
+        record = notif.get("record", {})
+        if record.get("$type") != "app.bsky.feed.post":
+            continue
+
+        txt = record.get("text", "").strip()
+        if not txt:
+            continue
+
+        uri = notif.get("uri", "")
+        indexed_at = notif.get("indexedAt")
+
+        print(f"\n🔍 Processing notification: {indexed_at}")
+        print(f"   Reason: {reason}")
+        print(f"   Text: '{txt}'")
 
         parent_text = await get_parent_post_text(uri, token)
         if parent_text:
-            prompt = f"User replied to this message: '{parent_text}'. Their comment: '{clean_txt}'. Provide a helpful response."
+            prompt = f"User replied to this message: '{parent_text}'. Their comment: '{txt}'. Provide a helpful response."
         else:
-            prompt = f"User says: '{clean_txt}'. Respond helpfully."
+            prompt = f"User says: '{txt}'. Respond helpfully."
 
         reply = ask_local(prompt)
         await post_reply(reply, uri, token)
-        print(f"✅ Replied to {uri}")
+        print(f"✅ Replied: '{reply}'")
 
-        new_processed.add(indexed_at)
-
-        # ✅ Mark this notification as read immediately after replying
+        # ✅ Mark this notification as read IMMEDIATELY after replying
         await mark_notification_as_read(token, indexed_at)
-        print(f"✅ Marked notification {indexed_at} as read")
+        print(f"✅ Marked as read")
 
         delay = random.randint(60, 120)
         print(f"⏳ Waiting {delay} seconds before next reply...")
         await asyncio.sleep(delay)
 
-    if new_processed != processed_keys:
-        save_processed_notif_keys(new_processed)
-        print(f"\n💾 Saved {len(new_processed)} processed notification keys")
-    else:
-        print("\nℹ️ No new notifications to process")
+    print("✅ All unread notifications processed")
 
 if __name__ == "__main__":
     asyncio.run(main())
