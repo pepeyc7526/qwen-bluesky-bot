@@ -21,7 +21,12 @@ def load_last_processed():
         with open(LAST_PROCESSED_FILE, "r") as f:
             data = json.load(f)
             return data.get("indexedAt", "1970-01-01T00:00:00.000Z")
-    return "1970-01-01T00:00:00.000Z"
+    else:
+        # ✅ Initialize with current time if file doesn't exist
+        now = datetime.datetime.utcnow().isoformat() + "Z"
+        save_last_processed(now)
+        print(f"🆕 Initialized last_processed.json with current time: {now}")
+        return now
 
 def save_last_processed(indexed_at):
     with open(LAST_PROCESSED_FILE, "w") as f:
@@ -110,12 +115,12 @@ def ask_local(prompt: str) -> str:
     full_prompt = ""
     for msg in messages:
         if msg["role"] == "user":
-            full_prompt += "                                <|im_start|>user\n" + msg['content'] + "<|im_end|>\n"
+            full_prompt += "                                      <|im_start|>user\n" + msg['content'] + " <|im_end|>\n"
         elif msg["role"] == "assistant":
-            full_prompt += "                                <|im_start|>assistant\n" + msg['content'] + "<|im_end|>\n"
+            full_prompt += "                                      <|im_start|>assistant\n" + msg['content'] + " <|im_end|>\n"
         else:
-            full_prompt += "                                <|im_start|>system\n" + msg['content'] + "<|im_end|>\n"
-    full_prompt += "                                <|im_start|>assistant\n"
+            full_prompt += "                                      <|im_start|>system\n" + msg['content'] + " <|im_end|>\n"
+    full_prompt += "                                      <|im_start|>assistant\n"
 
     out = llm(
         full_prompt,
