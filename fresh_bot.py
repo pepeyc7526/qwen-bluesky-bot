@@ -2,18 +2,20 @@
 import os, json, datetime, asyncio, httpx
 from llama_cpp import Llama
 
-BOT_HANDLE    = os.getenv("BOT_HANDLE", "bot-pepeyc7526.bsky.social")
+# Load all config from environment variables
+BOT_HANDLE    = os.getenv("BOT_HANDLE")
 BOT_PASSWORD  = os.getenv("BOT_PASSWORD")
-BOT_DID       = "did:plc:er457dupy7iytuzdgfmfsuv7"
-OWNER_DID     = "did:plc:topho472iindqxv5hm7nzww2"
+BOT_DID       = os.getenv("BOT_DID")
+OWNER_DID     = os.getenv("OWNER_DID")
 MAX_LEN       = 300
 SEARCH_USAGE_FILE = "search_usage.json"
 
+# Validate required environment variables
+if not all([BOT_HANDLE, BOT_PASSWORD, BOT_DID, OWNER_DID]):
+    raise RuntimeError("Missing required env vars: BOT_HANDLE, BOT_PASSWORD, BOT_DID, OWNER_DID")
+
 MODEL_PATH = "models/qwen2-7b-instruct-q4_k_m.gguf"
 llm = Llama(model_path=MODEL_PATH, n_ctx=2048, n_threads=2, verbose=False)
-
-if not BOT_PASSWORD:
-    raise RuntimeError("BOT_PASSWORD missing")
 
 # === WEB SEARCH ===
 async def web_search(query: str) -> str:
@@ -147,12 +149,12 @@ def ask_local(prompt: str) -> str:
     full_prompt = ""
     for msg in messages:
         if msg["role"] == "user":
-            full_prompt += f"      <|im_start|>user\n{msg['content']}<|im_end|>>\n"
+            full_prompt += f"       <|im_start|>user\n{msg['content']}<|im_end|>>\n"
         elif msg["role"] == "assistant":
-            full_prompt += f"      <|im_start|>assistant\n{msg['content']}<|im_end|>>\n"
+            full_prompt += f"       <|im_start|>assistant\n{msg['content']}<|im_end|>>\n"
         else:
-            full_prompt += f"      <|im_start|>system\n{msg['content']}<|im_end|>>\n"
-    full_prompt += "      <|im_start|>assistant\n"
+            full_prompt += f"       <|im_start|>system\n{msg['content']}<|im_end|>>\n"
+    full_prompt += "       <|im_start|>assistant\n"
 
     out = llm(
         full_prompt,
