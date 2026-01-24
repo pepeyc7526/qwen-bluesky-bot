@@ -15,6 +15,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           token: ${{ secrets.PAT }}
+          ref: main  # ← КЛЮЧЕВОЕ ИЗМЕНЕНИЕ
 
       - name: Set up Python 3.11
         uses: actions/setup-python@v5
