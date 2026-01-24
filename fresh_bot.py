@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-import os, json, datetime, asyncio, httpx
+import os, json, datetime, asyncio, httpx, random
 from llama_cpp import Llama
 
 # Load all config from environment variables
@@ -139,12 +139,12 @@ def ask_local(prompt: str) -> str:
     full_prompt = ""
     for msg in messages:
         if msg["role"] == "user":
-            full_prompt += f"               <|im_start|>user\n{msg['content']}<|im_end|>>\n"
+            full_prompt += f"                  <|im_start|>user\n{msg['content']}<|im_end|>>\n"
         elif msg["role"] == "assistant":
-            full_prompt += f"               <|im_start|>assistant\n{msg['content']}<|im_end|>>\n"
+            full_prompt += f"                  <|im_start|>assistant\n{msg['content']}<|im_end|>>\n"
         else:
-            full_prompt += f"               <|im_start|>system\n{msg['content']}<|im_end|>>\n"
-    full_prompt += "               <|im_start|>assistant\n"
+            full_prompt += f"                  <|im_start|>system\n{msg['content']}<|im_end|>>\n"
+    full_prompt += "                  <|im_start|>assistant\n"
 
     out = llm(
         full_prompt,
@@ -193,37 +193,60 @@ async def main():
     # Load processed notification IDs
     processed_ids = load_processed_notif_ids()
     new_processed = set(processed_ids)
+    print(f"💾 Loaded {len(processed_ids)} processed notification IDs")
 
     notifications = await get_notifications(token)
     print(f"📥 Found {len(notifications)} notifications")
 
+    valid_notifs = []
     for notif in notifications:
+        print(f"\n📨 Notification ID: {notif.get('id', 'N/A')}")
+        print(f"   Author DID: {notif.get('author', {}).get('did', 'N/A')}")
+        print(f"   Reason: {notif.get('reason', 'N/A')}")
+        txt_preview = notif.get('record', {}).get('text', '')[:60].replace('\n', ' ')
+        print(f"   Text preview: '{txt_preview}...'")
+
         author_did = notif.get("author", {}).get("did", "")
         if author_did != OWNER_DID:
+            print("   ❌ Skipped: not from owner")
             continue
 
         reason = notif.get("reason")
         if reason not in ("mention", "reply"):
+            print("   ❌ Skipped: not mention or reply")
             continue
 
         record = notif.get("record", {})
         if record.get("$type") != "app.bsky.feed.post":
+            print("   ❌ Skipped: not a post")
             continue
 
-        txt = record.get("text", "")
+        notif_id = notif.get("id")
+        if not notif_id:
+            print("   ❌ Skipped: no ID")
+            continue
+
+        if notif_id in processed_ids:
+            print("   ❌ Skipped: already processed")
+            continue
+
+        valid_notifs.append(notif)
+
+    # Process oldest first
+    valid_notifs.sort(key=lambda x: x.get("indexedAt", ""))
+
+    for notif in valid_notifs:
+        txt = notif.get("text", "")
         notif_id = notif.get("id")
         uri = notif.get("uri", "")
 
-        if not notif_id or notif_id in processed_ids:
-            continue
-
-        # Remove bot mention from ANY position
         clean_txt = txt.strip()
         bot_mention = f"@{BOT_HANDLE}"
         if bot_mention in clean_txt:
             clean_txt = clean_txt.replace(bot_mention, "", 1).strip()
         else:
-            if reason == "mention":
+            if notif.get("reason") == "mention":
+                print(f"   ❌ Skipped mention without handle in text")
                 continue
 
         print(f"🔍 Cleaned text: '{clean_txt}'")
@@ -240,10 +263,17 @@ async def main():
 
         new_processed.add(notif_id)
 
+        # Random delay between replies
+        delay = random.randint(60, 120)
+        print(f"⏳ Waiting {delay} seconds before next reply...")
+        await asyncio.sleep(delay)
+
     # Save updated list
     if new_processed != processed_ids:
         save_processed_notif_ids(new_processed)
-        print(f"💾 Saved {len(new_processed)} processed notification IDs")
+        print(f"\n💾 Saved {len(new_processed)} processed notification IDs")
+    else:
+        print("\nℹ️ No new notifications to process")
 
     # Mark all as read
     seen_at = datetime.datetime.utcnow().isoformat() + "Z"
