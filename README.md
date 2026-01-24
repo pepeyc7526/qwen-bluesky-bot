@@ -129,7 +129,7 @@ A: The counter resets — but that’s safe.
 This project was built with help from [**Qwen AI**](https://chat.qwen.ai/) via a human collaborator.  
 If you run into issues, you can ask for help using this prompt:
 
-> “I’m setting up the Bluesky AI Bot from https://github.com/pepeyc7526/bluesky-ai-bot.  
+> “I’m setting up the Bluesky AI Bot from https://github.com/pepeyc7526/qwen-bluesky-bot.  
 > I’ve done [steps X, Y, Z], but [describe issue].  
 > Here’s my log/error: [paste].  
 > My setup: [public repo, web search enabled?, etc.]”
