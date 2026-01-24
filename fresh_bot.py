@@ -137,12 +137,12 @@ def ask_local(prompt: str) -> str:
     full_prompt = ""
     for msg in messages:
         if msg["role"] == "user":
-            full_prompt += f"                      <|im_start|>user\n{msg['content']}<|im_end|>>\n"
+            full_prompt += f"                           <|im_start|>user\n{msg['content']}<|im_end|>>\n"
         elif msg["role"] == "assistant":
-            full_prompt += f"                      <|im_start|>assistant\n{msg['content']}<|im_end|>>\n"
+            full_prompt += f"                           <|im_start|>assistant\n{msg['content']}<|im_end|>>\n"
         else:
-            full_prompt += f"                      <|im_start|>system\n{msg['content']}<|im_end|>>\n"
-    full_prompt += "                      <|im_start|>assistant\n"
+            full_prompt += f"                           <|im_start|>system\n{msg['content']}<|im_end|>>\n"
+    full_prompt += "                           <|im_start|>assistant\n"
 
     out = llm(
         full_prompt,
@@ -197,32 +197,39 @@ async def main():
 
     valid_notifs = []
     for notif in notifications:
-        print(f"\n📨 Notification indexedAt: {notif.get('indexedAt', 'N/A')}")
-        print(f"   Author DID: {notif.get('author', {}).get('did', 'N/A')}")
-        print(f"   Reason: {notif.get('reason', 'N/A')}")
-        txt_preview = notif.get('record', {}).get('text', '')[:60].replace('\n', ' ')
+        indexed_at = notif.get("indexedAt")
+        author_did = notif.get("author", {}).get("did", "")
+        reason = notif.get("reason")
+        record = notif.get("record", {})
+        txt = record.get("text", "") if record else ""
+        txt_preview = txt[:60].replace('\n', ' ') if txt else ''
+
+        print(f"\n📨 Notification indexedAt: {indexed_at or 'N/A'}")
+        print(f"   Author DID: {author_did}")
+        print(f"   Reason: {reason}")
         print(f"   Text preview: '{txt_preview}...'")
 
-        author_did = notif.get("author", {}).get("did", "")
+        # Skip if not from owner
         if author_did != OWNER_DID:
             print("   ❌ Skipped: not from owner")
             continue
 
-        reason = notif.get("reason")
+        # Skip if not mention or reply
         if reason not in ("mention", "reply"):
             print("   ❌ Skipped: not mention or reply")
             continue
 
-        record = notif.get("record", {})
+        # Skip if not a post
         if record.get("$type") != "app.bsky.feed.post":
             print("   ❌ Skipped: not a post")
             continue
 
-        indexed_at = notif.get("indexedAt")
+        # Skip if no indexedAt
         if not indexed_at:
             print("   ❌ Skipped: no indexedAt")
             continue
 
+        # Skip if already processed
         if indexed_at in processed_keys:
             print("   ❌ Skipped: already processed")
             continue
@@ -235,15 +242,26 @@ async def main():
     for notif, indexed_at in valid_notifs:
         txt = notif.get("text", "")
         uri = notif.get("uri", "")
+        reason = notif.get("reason")
 
+        # Clean text: remove bot mention from ANY position
         clean_txt = txt.strip()
         bot_mention = f"@{BOT_HANDLE}"
         if bot_mention in clean_txt:
             clean_txt = clean_txt.replace(bot_mention, "", 1).strip()
         else:
-            if notif.get("reason") == "mention":
-                print(f"   ❌ Skipped mention without handle in text")
+            # For 'mention', it's acceptable if handle was parsed but not in text (edge case)
+            # We proceed anyway if reason is 'mention'
+            if reason == "mention":
+                pass  # Allow even if handle not found in text (API may normalize)
+            else:
+                print(f"   ❌ Skipped non-mention without handle")
                 continue
+
+        # Skip if cleaned text is empty
+        if not clean_txt:
+            print("   ❌ Skipped: empty text after cleaning")
+            continue
 
         print(f"🔍 Cleaned text: '{clean_txt}'")
 
