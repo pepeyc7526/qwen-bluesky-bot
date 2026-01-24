@@ -137,12 +137,12 @@ def ask_local(prompt: str) -> str:
     full_prompt = ""
     for msg in messages:
         if msg["role"] == "user":
-            full_prompt += f"                           <|im_start|>user\n{msg['content']}<|im_end|>>\n"
+            full_prompt += f"                              <|im_start|>user\n{msg['content']}<|im_end|>>\n"
         elif msg["role"] == "assistant":
-            full_prompt += f"                           <|im_start|>assistant\n{msg['content']}<|im_end|>>\n"
+            full_prompt += f"                              <|im_start|>assistant\n{msg['content']}<|im_end|>>\n"
         else:
-            full_prompt += f"                           <|im_start|>system\n{msg['content']}<|im_end|>>\n"
-    full_prompt += "                           <|im_start|>assistant\n"
+            full_prompt += f"                              <|im_start|>system\n{msg['content']}<|im_end|>>\n"
+    full_prompt += "                              <|im_start|>assistant\n"
 
     out = llm(
         full_prompt,
@@ -244,24 +244,23 @@ async def main():
         uri = notif.get("uri", "")
         reason = notif.get("reason")
 
-        # Clean text: remove bot mention from ANY position
-        clean_txt = txt.strip()
-        bot_mention = f"@{BOT_HANDLE}"
-        if bot_mention in clean_txt:
-            clean_txt = clean_txt.replace(bot_mention, "", 1).strip()
-        else:
-            # For 'mention', it's acceptable if handle was parsed but not in text (edge case)
-            # We proceed anyway if reason is 'mention'
-            if reason == "mention":
-                pass  # Allow even if handle not found in text (API may normalize)
-            else:
-                print(f"   ❌ Skipped non-mention without handle")
+        # For 'mention', always process — handle may be normalized out by API
+        if reason == "mention":
+            clean_txt = txt.strip()
+            # If empty after strip, skip
+            if not clean_txt:
+                print("   ❌ Skipped: empty mention text")
                 continue
-
-        # Skip if cleaned text is empty
-        if not clean_txt:
-            print("   ❌ Skipped: empty text after cleaning")
-            continue
+        else:
+            # For 'reply', clean bot mention if present
+            clean_txt = txt.strip()
+            bot_mention = f"@{BOT_HANDLE}"
+            if bot_mention in clean_txt:
+                clean_txt = clean_txt.replace(bot_mention, "", 1).strip()
+            # Allow empty reply? No — skip if empty
+            if not clean_txt:
+                print("   ❌ Skipped: empty reply text")
+                continue
 
         print(f"🔍 Cleaned text: '{clean_txt}'")
 
