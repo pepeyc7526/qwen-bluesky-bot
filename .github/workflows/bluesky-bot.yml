@@ -66,11 +66,33 @@ jobs:
 
       - name: Commit state files
         run: |
+          # Add state files
           git add search_usage.json last_processed.json 2>/dev/null || true
+          
+          # Check if there are changes to commit
           if ! git diff --cached --quiet; then
-            git config user.email "actions@github.com"
-            git config user.name "GitHub Actions"
-            git pull --rebase origin main
-            git commit -m "Update bot state"
-            git push
+            # Fetch latest changes
+            git fetch origin main
+            
+            # Stash local changes if any
+            if ! git diff --quiet; then
+              git stash
+            fi
+            
+            # Reset to latest remote
+            git reset --hard origin/main
+            
+            # Apply stashed changes (if any)
+            if git stash list | grep -q "stash"; then
+              git stash pop || true
+            fi
+            
+            # Add files again after reset
+            git add search_usage.json last_processed.json 2>/dev/null || true
+            
+            # Final check before commit
+            if ! git diff --cached --quiet; then
+              git commit -m "Update bot state"
+              git push
+            fi
           fi
