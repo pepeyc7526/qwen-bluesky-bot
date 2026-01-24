@@ -90,4 +90,4 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND.
 
 ---
 
-Made with ❤️ using **[Qwen AI](https://chat.qwen.ai/)** and **Bluesky**.
+Made with ❤️ using **[Qwen AI](https://chat.qwen.ai/)** and **[Bluesky](https://bsky.app/)**.
