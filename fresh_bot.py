@@ -15,14 +15,21 @@ llm = Llama(model_path=MODEL_PATH, n_ctx=2048, n_threads=2, verbose=False)
 if not BOT_PASSWORD:
     raise RuntimeError("BOT_PASSWORD missing")
 
-# === WEB SEARCH (остаётся, но не используется в этом режиме) ===
+# === WEB SEARCH ===
 async def web_search(query: str) -> str:
+    """Perform a web search using Google Custom Search Engine."""
     api_key = os.getenv("GOOGLE_API_KEY")
     cse_id = os.getenv("GOOGLE_CSE_ID")
     if not api_key or not cse_id:
         return ""
+
     url = "https://www.googleapis.com/customsearch/v1"
-    params = {"key": api_key, "cx": cse_id, "q": query, "num": 2}
+    params = {
+        "key": api_key,
+        "cx": cse_id,
+        "q": query,
+        "num": 2
+    }
     async with httpx.AsyncClient() as client:
         try:
             r = await client.get(url, params=params, timeout=10.0)
@@ -35,30 +42,36 @@ async def web_search(query: str) -> str:
             return ""
 
 def load_search_usage():
+    """Load web search usage counter from file."""
     if os.path.exists(SEARCH_USAGE_FILE):
         with open(SEARCH_USAGE_FILE, "r") as f:
             return json.load(f)
     return {"count": 0, "month": datetime.datetime.now().month}
 
 def save_search_usage(count: int):
+    """Save web search usage counter to file."""
     data = {"count": count, "month": datetime.datetime.now().month}
     with open(SEARCH_USAGE_FILE, "w") as f:
         json.dump(data, f)
 
 def should_reset_counter():
+    """Check if monthly counter should be reset."""
     usage = load_search_usage()
     current_month = datetime.datetime.now().month
     return usage["month"] != current_month
 
-# === BLUESKY FUNCTIONS ===
+# === BLUESKY AUTHENTICATION ===
 async def get_fresh_token() -> str:
+    """Authenticate and return a fresh session token."""
     url = "https://bsky.social/xrpc/com.atproto.server.createSession"
     payload = {"identifier": BOT_HANDLE, "password": BOT_PASSWORD}
     async with httpx.AsyncClient() as client:
         r = await client.post(url, json=payload)
         return r.json()["accessJwt"]
 
+# === POSTING FUNCTIONS ===
 async def post_to_bluesky(text: str, token: str):
+    """Post a new message to Bluesky."""
     url = "https://bsky.social/xrpc/com.atproto.repo.createRecord"
     payload = {
         "repo": BOT_DID,
@@ -73,6 +86,7 @@ async def post_to_bluesky(text: str, token: str):
         await client.post(url, headers={"Authorization": f"Bearer {token}"}, json=payload)
 
 async def get_record_cid(uri: str, token: str):
+    """Fetch the CID of a post by URI."""
     try:
         parts = uri.split("/")
         repo, collection, rkey = parts[2], parts[3], parts[4]
@@ -83,20 +97,24 @@ async def get_record_cid(uri: str, token: str):
     except Exception:
         return "bafyreihjdbd4zq4f4a5v6w5z5g5q5j5j5j5j5j5j5j5j5j5j5j5j5j5j5j5j5j"
 
+# === NOTIFICATIONS ===
 async def get_notifications(token: str):
+    """Fetch unread notifications."""
     url = "https://bsky.social/xrpc/app.bsky.notification.listNotifications"
     async with httpx.AsyncClient() as client:
         r = await client.get(url, headers={"Authorization": f"Bearer {token}"})
         return r.json().get("notifications", [])
 
 async def mark_as_read(token: str, seen_at: str):
+    """Mark all notifications as read."""
     url = "https://bsky.social/xrpc/app.bsky.notification.updateSeen"
     payload = {"seenAt": seen_at}
     async with httpx.AsyncClient() as client:
         await client.post(url, headers={"Authorization": f"Bearer {token}"}, json=payload)
 
-# === NEW: Get parent post text ===
+# === CONTEXT AWARENESS ===
 async def get_parent_post_text(uri: str, token: str) -> str:
+    """Retrieve the text of the parent post if current URI is a reply."""
     try:
         parts = uri.split("/")
         repo, rkey = parts[2], parts[4]
@@ -118,7 +136,9 @@ async def get_parent_post_text(uri: str, token: str) -> str:
         print(f"[PARENT ERROR] {e}")
         return ""
 
+# === AI RESPONSE GENERATION ===
 def ask_local(prompt: str) -> str:
+    """Generate a response using the local LLM (Qwen2)."""
     messages = [
         {"role": "system", "content": "You are a helpful AI assistant. Answer briefly and clearly. Keep under 300 chars. No links or emojis."},
         {"role": "user", "content": prompt}
@@ -127,12 +147,12 @@ def ask_local(prompt: str) -> str:
     full_prompt = ""
     for msg in messages:
         if msg["role"] == "user":
-            full_prompt += f"   <|im_start|>user\n{msg['content']}<|im_end|>>\n"
+            full_prompt += f"      <|im_start|>user\n{msg['content']}<|im_end|>>\n"
         elif msg["role"] == "assistant":
-            full_prompt += f"   <|im_start|>assistant\n{msg['content']}<|im_end|>>\n"
+            full_prompt += f"      <|im_start|>assistant\n{msg['content']}<|im_end|>>\n"
         else:
-            full_prompt += f"   <|im_start|>system\n{msg['content']}<|im_end|>>\n"
-    full_prompt += "   <|im_start|>assistant\n"
+            full_prompt += f"      <|im_start|>system\n{msg['content']}<|im_end|>>\n"
+    full_prompt += "      <|im_start|>assistant\n"
 
     out = llm(
         full_prompt,
@@ -149,7 +169,9 @@ def ask_local(prompt: str) -> str:
 
     return ans[:MAX_LEN] if len(ans) > MAX_LEN else ans
 
+# === REPLY POSTING ===
 async def post_reply(text: str, reply_to_uri: str, token: str):
+    """Post a reply to a specific URI."""
     cid = await get_record_cid(reply_to_uri, token)
     url = "https://bsky.social/xrpc/com.atproto.repo.createRecord"
     payload = {
@@ -168,26 +190,32 @@ async def post_reply(text: str, reply_to_uri: str, token: str):
     async with httpx.AsyncClient() as client:
         await client.post(url, headers={"Authorization": f"Bearer {token}"}, json=payload)
 
-# === MAIN ===
+# === MAIN LOGIC ===
 async def main():
+    """Main bot loop: process notifications and reply."""
     token = await get_fresh_token()
     print("✅ Checking notifications...")
 
+    # Reset monthly search counter if needed
     if should_reset_counter():
         save_search_usage(0)
         print("📅 Search counter reset")
 
+    # Fetch notifications
     notifications = await get_notifications(token)
     print(f"📥 Found {len(notifications)} notifications")
 
     for notif in notifications:
+        # Skip already read
         if notif.get("isRead"):
             continue
 
+        # Only respond to owner
         author_did = notif.get("author", {}).get("did", "")
         if author_did != OWNER_DID:
             continue
 
+        # Only handle mentions and replies
         reason = notif.get("reason")
         if reason not in ("mention", "reply"):
             continue
@@ -202,27 +230,33 @@ async def main():
         if not uri:
             continue
 
-        # Удаляем упоминание бота
+        # Remove bot mention from ANY position in text
         clean_txt = txt.strip()
         bot_mention = f"@{BOT_HANDLE}"
-        if clean_txt.startswith(bot_mention):
-            clean_txt = clean_txt[len(bot_mention):].strip()
+        if bot_mention in clean_txt:
+            clean_txt = clean_txt.replace(bot_mention, "", 1).strip()
+        else:
+            # For 'mention' type, bot handle must be present
+            if reason == "mention":
+                continue
 
         print(f"🔍 Cleaned text: '{clean_txt}'")
 
-        # === Основная логика: всегда отвечать на упоминание ===
+        # Get parent post if this is a reply
         parent_text = await get_parent_post_text(uri, token)
+
+        # Build prompt with or without context
         if parent_text:
-            # Ответ на реплай → используем родительский пост
             prompt = f"User replied to this message: '{parent_text}'. Their comment: '{clean_txt}'. Provide a helpful response."
         else:
-            # Обычное упоминание
             prompt = f"User says: '{clean_txt}'. Respond helpfully."
 
+        # Generate and post reply
         reply = ask_local(prompt)
         await post_reply(reply, uri, token)
         print(f"✅ Replied to {uri}")
 
+    # Mark all as read
     seen_at = datetime.datetime.utcnow().isoformat() + "Z"
     await mark_as_read(token, seen_at)
     print("✅ All notifications marked as read")
