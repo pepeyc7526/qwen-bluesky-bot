@@ -115,7 +115,7 @@ def ask_local(prompt: str) -> str:
             full_prompt += f"<|im_start|>assistant\n{msg['content']}<|im_end|>>\n"
         else:
             full_prompt += f"<|im_start|>system\n{msg['content']}<|im_end|>>\n"
-    full_prompt += "<|im_start|>assistant\n"
+    full_prompt += " <|im_start|>assistant\n"
 
     out = llm(
         full_prompt,
@@ -174,8 +174,8 @@ async def main():
         if author_did != OWNER_DID:
             continue
 
-        # Проверяем тип
-        if notif.get("reason") != "mention":
+        reason = notif.get("reason")
+        if reason not in ("mention", "reply"):
             continue
 
         record = notif.get("record", {})
@@ -188,13 +188,14 @@ async def main():
         if not uri:
             continue
 
-        # Удаляем упоминание бота
+        # Обработка текста
         clean_txt = txt.strip()
-        bot_mention = f"@{BOT_HANDLE}"
-        if clean_txt.startswith(bot_mention):
-            clean_txt = clean_txt[len(bot_mention):].strip()
+        if reason == "mention":
+            bot_mention = f"@{BOT_HANDLE}"
+            if clean_txt.startswith(bot_mention):
+                clean_txt = clean_txt[len(bot_mention):].strip()
 
-        print(f"🔍 Cleaned text: '{clean_txt}'")
+        print(f"🔍 [{reason}] Cleaned text: '{clean_txt}'")
 
         # === ai web ... ===
         if clean_txt.lower().startswith("ai web "):
