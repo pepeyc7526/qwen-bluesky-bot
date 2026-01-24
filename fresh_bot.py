@@ -9,7 +9,7 @@ BOT_DID       = os.getenv("BOT_DID")
 OWNER_DID     = os.getenv("OWNER_DID")
 MAX_LEN       = 300
 SEARCH_USAGE_FILE = "search_usage.json"
-PROCESSED_URIS_FILE = "processed_uris.json"
+PROCESSED_NOTIF_IDS_FILE = "processed_notif_ids.json"
 
 # Validate required environment variables
 if not all([BOT_HANDLE, BOT_PASSWORD, BOT_DID, OWNER_DID]):
@@ -18,17 +18,17 @@ if not all([BOT_HANDLE, BOT_PASSWORD, BOT_DID, OWNER_DID]):
 MODEL_PATH = "models/qwen2-7b-instruct-q4_k_m.gguf"
 llm = Llama(model_path=MODEL_PATH, n_ctx=2048, n_threads=2, verbose=False)
 
-def load_processed_uris():
-    if os.path.exists(PROCESSED_URIS_FILE):
-        with open(PROCESSED_URIS_FILE, "r") as f:
+def load_processed_notif_ids():
+    if os.path.exists(PROCESSED_NOTIF_IDS_FILE):
+        with open(PROCESSED_NOTIF_IDS_FILE, "r") as f:
             return set(json.load(f))
     return set()
 
-def save_processed_uris(uris):
-    with open(PROCESSED_URIS_FILE, "w") as f:
-        json.dump(list(uris), f)
+def save_processed_notif_ids(ids):
+    with open(PROCESSED_NOTIF_IDS_FILE, "w") as f:
+        json.dump(list(ids), f)
 
-# === остальные функции без изменений: web_search, get_fresh_token, get_parent_post_text, ask_local, post_reply ===
+# === остальные функции без изменений ===
 
 # === WEB SEARCH ===
 async def web_search(query: str) -> str:
@@ -139,12 +139,12 @@ def ask_local(prompt: str) -> str:
     full_prompt = ""
     for msg in messages:
         if msg["role"] == "user":
-            full_prompt += f"             <|im_start|>user\n{msg['content']}<|im_end|>>\n"
+            full_prompt += f"               <|im_start|>user\n{msg['content']}<|im_end|>>\n"
         elif msg["role"] == "assistant":
-            full_prompt += f"             <|im_start|>assistant\n{msg['content']}<|im_end|>>\n"
+            full_prompt += f"               <|im_start|>assistant\n{msg['content']}<|im_end|>>\n"
         else:
-            full_prompt += f"             <|im_start|>system\n{msg['content']}<|im_end|>>\n"
-    full_prompt += "             <|im_start|>assistant\n"
+            full_prompt += f"               <|im_start|>system\n{msg['content']}<|im_end|>>\n"
+    full_prompt += "               <|im_start|>assistant\n"
 
     out = llm(
         full_prompt,
@@ -186,16 +186,14 @@ async def main():
     token = await get_fresh_token()
     print("✅ Checking notifications...")
 
-    # Reset monthly search counter if needed
     if should_reset_counter():
         save_search_usage(0)
         print("📅 Search counter reset")
 
-    # Load processed URIs
-    processed_uris = load_processed_uris()
-    new_processed = set(processed_uris)
+    # Load processed notification IDs
+    processed_ids = load_processed_notif_ids()
+    new_processed = set(processed_ids)
 
-    # Fetch notifications (all, including read)
     notifications = await get_notifications(token)
     print(f"📥 Found {len(notifications)} notifications")
 
@@ -213,9 +211,10 @@ async def main():
             continue
 
         txt = record.get("text", "")
+        notif_id = notif.get("id")
         uri = notif.get("uri", "")
 
-        if not uri or uri in processed_uris:
+        if not notif_id or notif_id in processed_ids:
             continue
 
         # Remove bot mention from ANY position
@@ -239,15 +238,14 @@ async def main():
         await post_reply(reply, uri, token)
         print(f"✅ Replied to {uri}")
 
-        # Mark as processed
-        new_processed.add(uri)
+        new_processed.add(notif_id)
 
     # Save updated list
-    if new_processed != processed_uris:
-        save_processed_uris(new_processed)
-        print(f"💾 Saved {len(new_processed)} processed URIs")
+    if new_processed != processed_ids:
+        save_processed_notif_ids(new_processed)
+        print(f"💾 Saved {len(new_processed)} processed notification IDs")
 
-    # Optional: mark as read (safe now)
+    # Mark all as read
     seen_at = datetime.datetime.utcnow().isoformat() + "Z"
     async with httpx.AsyncClient() as client:
         await client.post(
