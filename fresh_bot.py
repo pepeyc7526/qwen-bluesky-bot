@@ -19,7 +19,8 @@ llm = Llama(model_path=MODEL_PATH, n_ctx=2048, n_threads=2, verbose=False)
 def load_last_processed():
     if os.path.exists(LAST_PROCESSED_FILE):
         with open(LAST_PROCESSED_FILE, "r") as f:
-            return json.load(f).get("indexedAt", "1970-01-01T00:00:00.000Z")
+            data = json.load(f)
+            return data.get("indexedAt", "1970-01-01T00:00:00.000Z")
     return "1970-01-01T00:00:00.000Z"
 
 def save_last_processed(indexed_at):
@@ -51,7 +52,6 @@ async def get_fresh_token() -> str:
 
 async def post_reply(text: str, reply_to_uri: str, token: str):
     try:
-        # Extract CID for the post we're replying to
         parts = reply_to_uri.split("/")
         repo, collection, rkey = parts[2], parts[3], parts[4]
         url = f"https://bsky.social/xrpc/com.atproto.repo.getRecord?repo={repo}&collection={collection}&rkey={rkey}"
@@ -110,17 +110,17 @@ def ask_local(prompt: str) -> str:
     full_prompt = ""
     for msg in messages:
         if msg["role"] == "user":
-            full_prompt += "                              <im_start>user\n" + msg['content'] + "<im_end>\n"
+            full_prompt += "                                <|im_start|>user\n" + msg['content'] + "<|im_end|>\n"
         elif msg["role"] == "assistant":
-            full_prompt += "                              <im_start>assistant\n" + msg['content'] + "<im_end>\n"
+            full_prompt += "                                <|im_start|>assistant\n" + msg['content'] + "<|im_end|>\n"
         else:
-            full_prompt += "                              <im_start>system\n" + msg['content'] + "<im_end>\n"
-    full_prompt += "                              <im_start>assistant\n"
+            full_prompt += "                                <|im_start|>system\n" + msg['content'] + "<|im_end|>\n"
+    full_prompt += "                                <|im_start|>assistant\n"
 
     out = llm(
         full_prompt,
         max_tokens=120,
-        stop=["<im_end>", "<im_start>"],
+        stop=["<|im_end|>", "<|im_start|>"],
         echo=False,
         temperature=0.3
     )
@@ -146,29 +146,17 @@ async def main():
         save_search_usage(0)
         print("📅 Search counter reset")
 
-    # Load last processed time
     last_indexed_at = load_last_processed()
     print(f"🕒 Last processed notification: {last_indexed_at}")
 
-    # Fetch notifications
     url = "https://bsky.social/xrpc/app.bsky.notification.listNotifications"
     async with httpx.AsyncClient() as client:
         r = await client.get(url, headers={"Authorization": f"Bearer {token}"}, timeout=30.0)
         notifications = r.json().get("notifications", [])
 
     print(f"📥 Found {len(notifications)} notifications from API")
-    
-    # Log all notifications for debugging
-    print("\n📋 ALL NOTIFICATIONS DEBUG:")
-    for i, notif in enumerate(notifications):
-        indexed_at = notif.get("indexedAt", "N/A")
-        author = notif.get("author", {}).get("handle", "N/A")
-        reason = notif.get("reason", "N/A")
-        text = notif.get("record", {}).get("text", "")[:50] + "..." if notif.get("record") else "N/A"
-        is_read = notif.get("isRead", False)
-        print(f"{i+1}. [{indexed_at}] @{author} | {reason} | read:{is_read} | '{text}'")
 
-    # Filter: only new notifications from owner with valid content
+    # Filter only new, relevant notifications
     new_notifs = []
     for notif in notifications:
         indexed_at = notif.get("indexedAt", "")
@@ -178,38 +166,23 @@ async def main():
         txt = record.get("text", "").strip() if record else ""
         uri = notif.get("uri", "")
 
-        if not indexed_at:
-            print(f"❌ Skipped: no indexedAt - {indexed_at}")
+        if not indexed_at or not txt or not uri:
             continue
-            
-        if not txt:
-            print(f"❌ Skipped: empty text - '{txt}'")
-            continue
-            
-        if not uri:
-            print(f"❌ Skipped: no URI")
-            continue
-            
         if indexed_at <= last_indexed_at:
-            print(f"❌ Skipped: not new (last processed: {last_indexed_at})")
             continue
-            
         if author_did != OWNER_DID:
-            print(f"❌ Skipped: not from owner (author: {author_did})")
             continue
-            
+        if reason not in ("mention", "reply"):
+            continue
         if record.get("$type") != "app.bsky.feed.post":
-            print(f"❌ Skipped: not a post (type: {record.get('$type')})")
             continue
 
-        # Log accepted notification
-        print(f"✅ ACCEPTED: {reason} | {indexed_at} | '{txt[:30]}...'")
         new_notifs.append((notif, indexed_at))
 
-    print(f"\n🔍 Found {len(new_notifs)} valid notifications to process")
+    print(f"🔍 Found {len(new_notifs)} new notifications to process")
 
     if not new_notifs:
-        # Still mark latest notification as read to reset UI counter
+        # Still mark latest as read to reset UI
         if notifications:
             latest = max(notifications, key=lambda x: x.get("indexedAt", ""))
             await mark_notifications_as_read(token, latest.get("indexedAt", ""))
@@ -218,7 +191,7 @@ async def main():
             print("ℹ️ No notifications to process")
         return
 
-    # Process notifications, oldest first
+    # Process oldest first
     new_notifs.sort(key=lambda x: x[1])
     latest_processed = last_indexed_at
     processed_count = 0
@@ -228,23 +201,14 @@ async def main():
         uri = notif["uri"]
         reason = notif["reason"]
 
-        print(f"\n📬 Processing notification: {indexed_at}")
-        print(f"   Reason: {reason}")
-        print(f"   Text: '{txt}'")
-        print(f"   URI: {uri}")
+        print(f"\n📬 Processing: {indexed_at} | {reason} | '{txt[:50]}...'")
 
         parent_text = await get_parent_post_text(uri, token)
+        prompt = f"User says: '{txt}'. Respond helpfully."
         if parent_text:
-            print(f"   Parent post text: '{parent_text}'")
-            prompt = f"User replied to this message: '{parent_text}'. Their comment: '{txt}'. Provide a helpful response."
-        else:
-            prompt = f"User says: '{txt}'. Respond helpfully."
-
-        print(f"   Prompt: '{prompt}'")
+            prompt = f"User replied to: '{parent_text}'. Comment: '{txt}'. Respond helpfully."
 
         reply = ask_local(prompt)
-        print(f"   Generated reply: '{reply}'")
-
         await post_reply(reply, uri, token)
         print(f"✅ Replied: '{reply}'")
 
@@ -253,15 +217,12 @@ async def main():
             latest_processed = indexed_at
 
         delay = random.randint(60, 120)
-        print(f"⏳ Waiting {delay} seconds before next reply...")
+        print(f"⏳ Waiting {delay} seconds...")
         await asyncio.sleep(delay)
 
-    # Save progress
-    if latest_processed != last_indexed_at:
-        save_last_processed(latest_processed)
-        print(f"💾 Last processed time updated to: {latest_processed}")
-    else:
-        print("ℹ️ No new last processed time to save")
+    # Save state
+    save_last_processed(latest_processed)
+    print(f"💾 Saved last processed time: {latest_processed}")
 
     # Reset UI counter
     await mark_notifications_as_read(token, latest_processed)
