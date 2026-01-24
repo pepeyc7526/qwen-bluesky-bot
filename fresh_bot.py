@@ -137,4 +137,151 @@ def ask_local(prompt: str) -> str:
     full_prompt = ""
     for msg in messages:
         if msg["role"] == "user":
-            full_prompt += f"                                 
+            full_prompt += "                                  <|im_start|>user\n" + msg['content'] + "<|im_end|>>\n"
+        elif msg["role"] == "assistant":
+            full_prompt += "                                  <|im_start|>assistant\n" + msg['content'] + "<|im_end|>>\n"
+        else:
+            full_prompt += "                                  <|im_start|>system\n" + msg['content'] + "<|im_end|>>\n"
+    full_prompt += "                                  <|im_start|>assistant\n"
+
+    out = llm(
+        full_prompt,
+        max_tokens=120,
+        stop=["<|im_end|>", "<|im_start|>"],
+        echo=False,
+        temperature=0.3
+    )
+    ans = out["choices"][0]["text"].strip()
+    ans = " ".join(ans.split())
+
+    if any(w in ans.lower() for w in ["don't know", "unclear", "provide more", "doesn't seem"]):
+        ans = "🤔 Not sure what you mean. Try rephrasing!"
+
+    return ans[:MAX_LEN] if len(ans) > MAX_LEN else ans
+
+# === REPLY POSTING ===
+async def post_reply(text: str, reply_to_uri: str, token: str):
+    cid = await get_record_cid(reply_to_uri, token)
+    url = "https://bsky.social/xrpc/com.atproto.repo.createRecord"
+    payload = {
+        "repo": BOT_DID,
+        "collection": "app.bsky.feed.post",
+        "record": {
+            "$type": "app.bsky.feed.post",
+            "text": text,
+            "reply": {
+                "root": {"uri": reply_to_uri, "cid": cid},
+                "parent": {"uri": reply_to_uri, "cid": cid}
+            },
+            "createdAt": datetime.datetime.utcnow().isoformat() + "Z"
+        }
+    }
+    async with httpx.AsyncClient() as client:
+        await client.post(url, headers={"Authorization": f"Bearer {token}"}, json=payload)
+
+# === MAIN LOGIC ===
+async def main():
+    token = await get_fresh_token()
+    print("✅ Checking notifications...")
+
+    if should_reset_counter():
+        save_search_usage(0)
+        print("📅 Search counter reset")
+
+    processed_keys = load_processed_notif_keys()
+    new_processed = set(processed_keys)
+    print(f"💾 Loaded {len(processed_keys)} processed notification keys")
+
+    notifications = await get_notifications(token)
+    print(f"📥 Found {len(notifications)} notifications")
+
+    valid_notifs = []
+    for notif in notifications:
+        indexed_at = notif.get("indexedAt")
+        author_did = notif.get("author", {}).get("did", "")
+        reason = notif.get("reason")
+        record = notif.get("record", {})
+        txt = record.get("text", "") if record else ""
+        txt_preview = txt[:60].replace('\n', ' ') if txt else ''
+
+        print(f"\n📨 Notification indexedAt: {indexed_at or 'N/A'}")
+        print(f"   Author DID: {author_did}")
+        print(f"   Reason: {reason}")
+        print(f"   Text preview: '{txt_preview}...'")
+
+        # Skip if not from owner
+        if author_did != OWNER_DID:
+            print("   ❌ Skipped: not from owner")
+            continue
+
+        # Skip if not mention or reply
+        if reason not in ("mention", "reply"):
+            print("   ❌ Skipped: not mention or reply")
+            continue
+
+        # Skip if not a post
+        if record.get("$type") != "app.bsky.feed.post":
+            print("   ❌ Skipped: not a post")
+            continue
+
+        # Skip if no indexedAt
+        if not indexed_at:
+            print("   ❌ Skipped: no indexedAt")
+            continue
+
+        # Skip if already processed
+        if indexed_at in processed_keys:
+            print("   ❌ Skipped: already processed")
+            continue
+
+        valid_notifs.append((notif, indexed_at))
+
+    # Process oldest first
+    valid_notifs.sort(key=lambda x: x[0].get("indexedAt", ""))
+
+    for notif, indexed_at in valid_notifs:
+        txt = notif.get("text", "")
+        uri = notif.get("uri", "")
+        reason = notif.get("reason")
+
+        # For 'mention' or 'reply', process the text as-is
+        clean_txt = txt.strip()
+        if not clean_txt:
+            print("   ❌ Skipped: empty text")
+            continue
+
+        print(f"🔍 Cleaned text: '{clean_txt}'")
+
+        parent_text = await get_parent_post_text(uri, token)
+        if parent_text:
+            prompt = f"User replied to this message: '{parent_text}'. Their comment: '{clean_txt}'. Provide a helpful response."
+        else:
+            prompt = f"User says: '{clean_txt}'. Respond helpfully."
+
+        reply = ask_local(prompt)
+        await post_reply(reply, uri, token)
+        print(f"✅ Replied to {uri}")
+
+        new_processed.add(indexed_at)
+
+        delay = random.randint(60, 120)
+        print(f"⏳ Waiting {delay} seconds before next reply...")
+        await asyncio.sleep(delay)
+
+    if new_processed != processed_keys:
+        save_processed_notif_keys(new_processed)
+        print(f"\n💾 Saved {len(new_processed)} processed notification keys")
+    else:
+        print("\nℹ️ No new notifications to process")
+
+    seen_at = datetime.datetime.utcnow().isoformat() + "Z"
+    async with httpx.AsyncClient() as client:
+        await client.post(
+            "https://bsky.social/xrpc/app.bsky.notification.updateSeen",
+            headers={"Authorization": f"Bearer {token}"},
+            json={"seenAt": seen_at}
+        )
+    print("✅ All notifications marked as read")
+
+if __name__ == "__main__":
+    asyncio.run(main())
