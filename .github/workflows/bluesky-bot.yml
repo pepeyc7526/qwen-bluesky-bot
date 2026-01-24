@@ -1,6 +1,5 @@
 name: Bluesky AI Bot (Qwen2 + Web Search)
 
-# Run every 20 minutes, manually, or via external trigger
 on:
   schedule:
     - cron: '*/20 * * * *'
@@ -13,35 +12,29 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      # Checkout repository with PAT for committing back
       - uses: actions/checkout@v4
         with:
           token: ${{ secrets.PAT }}
 
-      # Set up Python 3.11
       - name: Set up Python 3.11
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
 
-      # Install system dependencies
       - name: Install system dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y build-essential git
 
-      # Configure Git identity for commits
       - name: Configure Git
         run: |
           git config --global user.email "actions@github.com"
           git config --global user.name "GitHub Actions"
 
-      # Install Python dependencies
       - name: Install Python dependencies
         run: |
           pip install httpx llama-cpp-python
 
-      # Download Qwen2-7B GGUF model (4-bit quantized)
       - name: Download Qwen2-7B GGUF model
         run: |
           mkdir -p models
@@ -54,7 +47,6 @@ jobs:
           fi
           ls -lh
 
-      # Verify model was downloaded
       - name: Verify model exists
         run: |
           if [ ! -f "models/qwen2-7b-instruct-q4_k_m.gguf" ]; then
@@ -62,7 +54,6 @@ jobs:
             exit 1
           fi
 
-      # Run the bot
       - name: Run bot
         env:
           BOT_HANDLE: ${{ secrets.BOT_HANDLE }}
@@ -73,16 +64,13 @@ jobs:
           GOOGLE_CSE_ID: ${{ secrets.GOOGLE_CSE_ID }}
         run: python fresh_bot.py
 
-      # Commit search_usage.json back to repo (for quota tracking)
-      - name: Commit search_usage.json (if changed)
+      - name: Commit state files
         run: |
-          if [ -f "search_usage.json" ]; then
-            git add search_usage.json
-            if ! git diff --cached --quiet; then
-              git config user.email "actions@github.com"
-              git config user.name "GitHub Actions"
-              git pull --rebase origin main
-              git commit -m "Update search usage counter"
-              git push
-            fi
+          git add search_usage.json processed_notif_ids.json 2>/dev/null || true
+          if ! git diff --cached --quiet; then
+            git config user.email "actions@github.com"
+            git config user.name "GitHub Actions"
+            git pull --rebase origin main
+            git commit -m "Update bot state"
+            git push
           fi
