@@ -67,6 +67,8 @@ jobs:
         env:
           BOT_HANDLE: ${{ secrets.BOT_HANDLE }}
           BOT_PASSWORD: ${{ secrets.BOT_PASSWORD }}
+          BOT_DID: ${{ secrets.BOT_DID }}
+          OWNER_DID: ${{ secrets.OWNER_DID }}
           GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
           GOOGLE_CSE_ID: ${{ secrets.GOOGLE_CSE_ID }}
         run: python fresh_bot.py
