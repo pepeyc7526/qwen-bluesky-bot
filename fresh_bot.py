@@ -107,6 +107,13 @@ async def get_notifications(token: str):
         r = await client.get(url, headers={"Authorization": f"Bearer {token}"})
         return r.json().get("notifications", [])
 
+async def mark_as_read(token: str, seen_at: str):
+    """Mark all notifications as read up to this time."""
+    url = "https://bsky.social/xrpc/app.bsky.notification.updateSeen"
+    payload = {"seenAt": seen_at}
+    async with httpx.AsyncClient() as client:
+        await client.post(url, headers={"Authorization": f"Bearer {token}"}, json=payload)
+
 # === CONTEXT AWARENESS ===
 async def get_parent_post_text(uri: str, token: str) -> str:
     """Retrieve the text of the parent post if current URI is a reply."""
@@ -142,12 +149,12 @@ def ask_local(prompt: str) -> str:
     full_prompt = ""
     for msg in messages:
         if msg["role"] == "user":
-            full_prompt += f"        <|im_start|>user\n{msg['content']}<|im_end|>>\n"
+            full_prompt += f"          <|im_start|>user\n{msg['content']}<|im_end|>>\n"
         elif msg["role"] == "assistant":
-            full_prompt += f"        <|im_start|>assistant\n{msg['content']}<|im_end|>>\n"
+            full_prompt += f"          <|im_start|>assistant\n{msg['content']}<|im_end|>>\n"
         else:
-            full_prompt += f"        <|im_start|>system\n{msg['content']}<|im_end|>>\n"
-    full_prompt += "        <|im_start|>assistant\n"
+            full_prompt += f"          <|im_start|>system\n{msg['content']}<|im_end|>>\n"
+    full_prompt += "          <|im_start|>assistant\n"
 
     out = llm(
         full_prompt,
@@ -187,7 +194,7 @@ async def post_reply(text: str, reply_to_uri: str, token: str):
 
 # === MAIN LOGIC ===
 async def main():
-    """Main bot loop: process notifications and reply."""
+    """Main bot loop: process only unread notifications and mark them as read."""
     token = await get_fresh_token()
     print("✅ Checking notifications...")
 
@@ -204,7 +211,9 @@ async def main():
     processed_uris = set()
 
     for notif in notifications:
-        # DO NOT skip based on isRead — it causes missed replies
+        # ✅ ONLY process UNREAD notifications
+        if notif.get("isRead"):
+            continue
 
         # Only respond to owner
         author_did = notif.get("author", {}).get("did", "")
@@ -257,8 +266,10 @@ async def main():
         await post_reply(reply, uri, token)
         print(f"✅ Replied to {uri}")
 
-    # Do NOT mark as read — keep notifications visible for debugging and continuity
-    print("✅ Finished processing notifications")
+    # ✅ Mark all notifications as read AFTER processing
+    seen_at = datetime.datetime.utcnow().isoformat() + "Z"
+    await mark_as_read(token, seen_at)
+    print("✅ All notifications marked as read")
 
 if __name__ == "__main__":
     asyncio.run(main())
