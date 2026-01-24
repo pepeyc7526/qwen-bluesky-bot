@@ -15,20 +15,14 @@ llm = Llama(model_path=MODEL_PATH, n_ctx=2048, n_threads=2, verbose=False)
 if not BOT_PASSWORD:
     raise RuntimeError("BOT_PASSWORD missing")
 
-# === WEB SEARCH ===
+# === WEB SEARCH (остаётся, но не используется в этом режиме) ===
 async def web_search(query: str) -> str:
     api_key = os.getenv("GOOGLE_API_KEY")
     cse_id = os.getenv("GOOGLE_CSE_ID")
     if not api_key or not cse_id:
         return ""
-
     url = "https://www.googleapis.com/customsearch/v1"
-    params = {
-        "key": api_key,
-        "cx": cse_id,
-        "q": query,
-        "num": 2
-    }
+    params = {"key": api_key, "cx": cse_id, "q": query, "num": 2}
     async with httpx.AsyncClient() as client:
         try:
             r = await client.get(url, params=params, timeout=10.0)
@@ -101,21 +95,44 @@ async def mark_as_read(token: str, seen_at: str):
     async with httpx.AsyncClient() as client:
         await client.post(url, headers={"Authorization": f"Bearer {token}"}, json=payload)
 
+# === NEW: Get parent post text ===
+async def get_parent_post_text(uri: str, token: str) -> str:
+    try:
+        parts = uri.split("/")
+        repo, rkey = parts[2], parts[4]
+        url = f"https://bsky.social/xrpc/com.atproto.repo.getRecord?repo={repo}&collection=app.bsky.feed.post&rkey={rkey}"
+        async with httpx.AsyncClient() as client:
+            r = await client.get(url, headers={"Authorization": f"Bearer {token}"})
+            record = r.json().get("value", {})
+            reply = record.get("reply")
+            if not reply or "parent" not in reply:
+                return ""
+            parent_uri = reply["parent"]["uri"]
+            parent_parts = parent_uri.split("/")
+            parent_repo, parent_rkey = parent_parts[2], parent_parts[4]
+            parent_url = f"https://bsky.social/xrpc/com.atproto.repo.getRecord?repo={parent_repo}&collection=app.bsky.feed.post&rkey={parent_rkey}"
+            r2 = await client.get(parent_url, headers={"Authorization": f"Bearer {token}"})
+            parent_record = r2.json().get("value", {})
+            return parent_record.get("text", "")
+    except Exception as e:
+        print(f"[PARENT ERROR] {e}")
+        return ""
+
 def ask_local(prompt: str) -> str:
     messages = [
-        {"role": "system", "content": "You are a helpful AI assistant. Use context if provided. Keep under 300 chars. No links or emojis."},
+        {"role": "system", "content": "You are a helpful AI assistant. Answer briefly and clearly. Keep under 300 chars. No links or emojis."},
         {"role": "user", "content": prompt}
     ]
     
     full_prompt = ""
     for msg in messages:
         if msg["role"] == "user":
-            full_prompt += f"<|im_start|>user\n{msg['content']}<|im_end|>>\n"
+            full_prompt += f"   <|im_start|>user\n{msg['content']}<|im_end|>>\n"
         elif msg["role"] == "assistant":
-            full_prompt += f"<|im_start|>assistant\n{msg['content']}<|im_end|>>\n"
+            full_prompt += f"   <|im_start|>assistant\n{msg['content']}<|im_end|>>\n"
         else:
-            full_prompt += f"<|im_start|>system\n{msg['content']}<|im_end|>>\n"
-    full_prompt += " <|im_start|>assistant\n"
+            full_prompt += f"   <|im_start|>system\n{msg['content']}<|im_end|>>\n"
+    full_prompt += "   <|im_start|>assistant\n"
 
     out = llm(
         full_prompt,
@@ -156,7 +173,6 @@ async def main():
     token = await get_fresh_token()
     print("✅ Checking notifications...")
 
-    # Reset counter if new month
     if should_reset_counter():
         save_search_usage(0)
         print("📅 Search counter reset")
@@ -165,11 +181,9 @@ async def main():
     print(f"📥 Found {len(notifications)} notifications")
 
     for notif in notifications:
-        # Пропускаем, если уже прочитано
         if notif.get("isRead"):
             continue
 
-        # Проверяем, что уведомление от тебя
         author_did = notif.get("author", {}).get("did", "")
         if author_did != OWNER_DID:
             continue
@@ -188,40 +202,27 @@ async def main():
         if not uri:
             continue
 
-        # Обработка текста
+        # Удаляем упоминание бота
         clean_txt = txt.strip()
-        if reason == "mention":
-            bot_mention = f"@{BOT_HANDLE}"
-            if clean_txt.startswith(bot_mention):
-                clean_txt = clean_txt[len(bot_mention):].strip()
+        bot_mention = f"@{BOT_HANDLE}"
+        if clean_txt.startswith(bot_mention):
+            clean_txt = clean_txt[len(bot_mention):].strip()
 
-        print(f"🔍 [{reason}] Cleaned text: '{clean_txt}'")
+        print(f"🔍 Cleaned text: '{clean_txt}'")
 
-        # === ai web ... ===
-        if clean_txt.lower().startswith("ai web "):
-            content = clean_txt[7:].strip()
-            if content:
-                usage = load_search_usage()
-                if usage["count"] >= 100:
-                    reply = "🔍 Web search limit reached (100/month). Try again next month!"
-                else:
-                    print(f"🌐 Web search ({usage['count']+1}/100): {content}")
-                    context = await web_search(content)
-                    prompt = f"Context: {context}\nQuestion: {content}" if context else f"Question: {content}"
-                    reply = ask_local(prompt)
-                    save_search_usage(usage["count"] + 1)
-                await post_reply(reply, uri, token)
-                print(f"✅ Replied (web) to {uri}")
+        # === Основная логика: всегда отвечать на упоминание ===
+        parent_text = await get_parent_post_text(uri, token)
+        if parent_text:
+            # Ответ на реплай → используем родительский пост
+            prompt = f"User replied to this message: '{parent_text}'. Their comment: '{clean_txt}'. Provide a helpful response."
+        else:
+            # Обычное упоминание
+            prompt = f"User says: '{clean_txt}'. Respond helpfully."
 
-        # === ai ... ===
-        elif clean_txt.lower().startswith("ai "):
-            content = clean_txt[3:].strip()
-            if content:
-                reply = ask_local(f"Question: {content}")
-                await post_reply(reply, uri, token)
-                print(f"✅ Replied (local) to {uri}")
+        reply = ask_local(prompt)
+        await post_reply(reply, uri, token)
+        print(f"✅ Replied to {uri}")
 
-    # Помечаем всё как прочитанное
     seen_at = datetime.datetime.utcnow().isoformat() + "Z"
     await mark_as_read(token, seen_at)
     print("✅ All notifications marked as read")
