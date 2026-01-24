@@ -137,12 +137,12 @@ def ask_local(prompt: str) -> str:
     full_prompt = ""
     for msg in messages:
         if msg["role"] == "user":
-            full_prompt += "                                  <|im_start|>user\n" + msg['content'] + "<|im_end|>>\n"
+            full_prompt += "                                    <|im_start|>user\n" + msg['content'] + " <|im_end|>\n"
         elif msg["role"] == "assistant":
-            full_prompt += "                                  <|im_start|>assistant\n" + msg['content'] + "<|im_end|>>\n"
+            full_prompt += "                                    <|im_start|>assistant\n" + msg['content'] + " <|im_end|>\n"
         else:
-            full_prompt += "                                  <|im_start|>system\n" + msg['content'] + "<|im_end|>>\n"
-    full_prompt += "                                  <|im_start|>assistant\n"
+            full_prompt += "                                    <|im_start|>system\n" + msg['content'] + " <|im_end|>\n"
+    full_prompt += "                                    <|im_start|>assistant\n"
 
     out = llm(
         full_prompt,
@@ -176,6 +176,13 @@ async def post_reply(text: str, reply_to_uri: str, token: str):
             "createdAt": datetime.datetime.utcnow().isoformat() + "Z"
         }
     }
+    async with httpx.AsyncClient() as client:
+        await client.post(url, headers={"Authorization": f"Bearer {token}"}, json=payload)
+
+# === MARK AS READ ===
+async def mark_notification_as_read(token: str, seen_at: str):
+    url = "https://bsky.social/xrpc/app.bsky.notification.updateSeen"
+    payload = {"seenAt": seen_at}
     async with httpx.AsyncClient() as client:
         await client.post(url, headers={"Authorization": f"Bearer {token}"}, json=payload)
 
@@ -244,7 +251,6 @@ async def main():
         uri = notif.get("uri", "")
         reason = notif.get("reason")
 
-        # For 'mention' or 'reply', process the text as-is
         clean_txt = txt.strip()
         if not clean_txt:
             print("   ❌ Skipped: empty text")
@@ -264,6 +270,10 @@ async def main():
 
         new_processed.add(indexed_at)
 
+        # ✅ Mark this notification as read immediately after replying
+        await mark_notification_as_read(token, indexed_at)
+        print(f"✅ Marked notification {indexed_at} as read")
+
         delay = random.randint(60, 120)
         print(f"⏳ Waiting {delay} seconds before next reply...")
         await asyncio.sleep(delay)
@@ -273,15 +283,6 @@ async def main():
         print(f"\n💾 Saved {len(new_processed)} processed notification keys")
     else:
         print("\nℹ️ No new notifications to process")
-
-    seen_at = datetime.datetime.utcnow().isoformat() + "Z"
-    async with httpx.AsyncClient() as client:
-        await client.post(
-            "https://bsky.social/xrpc/app.bsky.notification.updateSeen",
-            headers={"Authorization": f"Bearer {token}"},
-            json={"seenAt": seen_at}
-        )
-    print("✅ All notifications marked as read")
 
 if __name__ == "__main__":
     asyncio.run(main())
