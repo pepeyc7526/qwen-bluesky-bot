@@ -9,7 +9,7 @@ BOT_DID       = os.getenv("BOT_DID")
 OWNER_DID     = os.getenv("OWNER_DID")
 MAX_LEN       = 300
 SEARCH_USAGE_FILE = "search_usage.json"
-PROCESSED_NOTIF_IDS_FILE = "processed_notif_ids.json"
+PROCESSED_NOTIF_KEYS_FILE = "processed_notif_keys.json"
 
 # Validate required environment variables
 if not all([BOT_HANDLE, BOT_PASSWORD, BOT_DID, OWNER_DID]):
@@ -18,17 +18,15 @@ if not all([BOT_HANDLE, BOT_PASSWORD, BOT_DID, OWNER_DID]):
 MODEL_PATH = "models/qwen2-7b-instruct-q4_k_m.gguf"
 llm = Llama(model_path=MODEL_PATH, n_ctx=2048, n_threads=2, verbose=False)
 
-def load_processed_notif_ids():
-    if os.path.exists(PROCESSED_NOTIF_IDS_FILE):
-        with open(PROCESSED_NOTIF_IDS_FILE, "r") as f:
+def load_processed_notif_keys():
+    if os.path.exists(PROCESSED_NOTIF_KEYS_FILE):
+        with open(PROCESSED_NOTIF_KEYS_FILE, "r") as f:
             return set(json.load(f))
     return set()
 
-def save_processed_notif_ids(ids):
-    with open(PROCESSED_NOTIF_IDS_FILE, "w") as f:
-        json.dump(list(ids), f)
-
-# === остальные функции без изменений ===
+def save_processed_notif_keys(keys):
+    with open(PROCESSED_NOTIF_KEYS_FILE, "w") as f:
+        json.dump(list(keys), f)
 
 # === WEB SEARCH ===
 async def web_search(query: str) -> str:
@@ -139,12 +137,12 @@ def ask_local(prompt: str) -> str:
     full_prompt = ""
     for msg in messages:
         if msg["role"] == "user":
-            full_prompt += f"                  <|im_start|>user\n{msg['content']}<|im_end|>>\n"
+            full_prompt += f"                      <|im_start|>user\n{msg['content']}<|im_end|>>\n"
         elif msg["role"] == "assistant":
-            full_prompt += f"                  <|im_start|>assistant\n{msg['content']}<|im_end|>>\n"
+            full_prompt += f"                      <|im_start|>assistant\n{msg['content']}<|im_end|>>\n"
         else:
-            full_prompt += f"                  <|im_start|>system\n{msg['content']}<|im_end|>>\n"
-    full_prompt += "                  <|im_start|>assistant\n"
+            full_prompt += f"                      <|im_start|>system\n{msg['content']}<|im_end|>>\n"
+    full_prompt += "                      <|im_start|>assistant\n"
 
     out = llm(
         full_prompt,
@@ -190,17 +188,16 @@ async def main():
         save_search_usage(0)
         print("📅 Search counter reset")
 
-    # Load processed notification IDs
-    processed_ids = load_processed_notif_ids()
-    new_processed = set(processed_ids)
-    print(f"💾 Loaded {len(processed_ids)} processed notification IDs")
+    processed_keys = load_processed_notif_keys()
+    new_processed = set(processed_keys)
+    print(f"💾 Loaded {len(processed_keys)} processed notification keys")
 
     notifications = await get_notifications(token)
     print(f"📥 Found {len(notifications)} notifications")
 
     valid_notifs = []
     for notif in notifications:
-        print(f"\n📨 Notification ID: {notif.get('id', 'N/A')}")
+        print(f"\n📨 Notification indexedAt: {notif.get('indexedAt', 'N/A')}")
         print(f"   Author DID: {notif.get('author', {}).get('did', 'N/A')}")
         print(f"   Reason: {notif.get('reason', 'N/A')}")
         txt_preview = notif.get('record', {}).get('text', '')[:60].replace('\n', ' ')
@@ -221,23 +218,22 @@ async def main():
             print("   ❌ Skipped: not a post")
             continue
 
-        notif_id = notif.get("id")
-        if not notif_id:
-            print("   ❌ Skipped: no ID")
+        indexed_at = notif.get("indexedAt")
+        if not indexed_at:
+            print("   ❌ Skipped: no indexedAt")
             continue
 
-        if notif_id in processed_ids:
+        if indexed_at in processed_keys:
             print("   ❌ Skipped: already processed")
             continue
 
-        valid_notifs.append(notif)
+        valid_notifs.append((notif, indexed_at))
 
     # Process oldest first
-    valid_notifs.sort(key=lambda x: x.get("indexedAt", ""))
+    valid_notifs.sort(key=lambda x: x[0].get("indexedAt", ""))
 
-    for notif in valid_notifs:
+    for notif, indexed_at in valid_notifs:
         txt = notif.get("text", "")
-        notif_id = notif.get("id")
         uri = notif.get("uri", "")
 
         clean_txt = txt.strip()
@@ -261,21 +257,18 @@ async def main():
         await post_reply(reply, uri, token)
         print(f"✅ Replied to {uri}")
 
-        new_processed.add(notif_id)
+        new_processed.add(indexed_at)
 
-        # Random delay between replies
         delay = random.randint(60, 120)
         print(f"⏳ Waiting {delay} seconds before next reply...")
         await asyncio.sleep(delay)
 
-    # Save updated list
-    if new_processed != processed_ids:
-        save_processed_notif_ids(new_processed)
-        print(f"\n💾 Saved {len(new_processed)} processed notification IDs")
+    if new_processed != processed_keys:
+        save_processed_notif_keys(new_processed)
+        print(f"\n💾 Saved {len(new_processed)} processed notification keys")
     else:
         print("\nℹ️ No new notifications to process")
 
-    # Mark all as read
     seen_at = datetime.datetime.utcnow().isoformat() + "Z"
     async with httpx.AsyncClient() as client:
         await client.post(
