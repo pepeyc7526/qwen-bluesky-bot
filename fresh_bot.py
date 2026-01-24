@@ -98,12 +98,12 @@ def ask_local(prompt: str) -> str:
     full_prompt = ""
     for msg in messages:
         if msg["role"] == "user":
-            full_prompt += "        <|im_start|>user\n" + msg['content'] + "<|im_end|>\n"
+            full_prompt += "              <|im_start|>user\n" + msg['content'] + " <|im_end|>\n"
         elif msg["role"] == "assistant":
-            full_prompt += "        <|im_start|>assistant\n" + msg['content'] + "<|im_end|>\n"
+            full_prompt += "              <|im_start|>assistant\n" + msg['content'] + " <|im_end|>\n"
         else:
-            full_prompt += "        <|im_start|>system\n" + msg['content'] + "<|im_end|>\n"
-    full_prompt += "        <|im_start|>assistant\n"
+            full_prompt += "              <|im_start|>system\n" + msg['content'] + " <|im_end|>\n"
+    full_prompt += "              <|im_start|>assistant\n"
 
     out = llm(
         full_prompt,
@@ -120,11 +120,14 @@ def ask_local(prompt: str) -> str:
 
     return ans[:MAX_LEN] if len(ans) > MAX_LEN else ans
 
-async def mark_notifications_as_read(token: str, seen_at: str):
+async def mark_all_notifications_read(token: str):
+    """Mark ALL notifications as read using current time"""
+    seen_at = datetime.datetime.utcnow().isoformat() + "Z"
     url = "https://bsky.social/xrpc/app.bsky.notification.updateSeen"
     payload = {"seenAt": seen_at}
     async with httpx.AsyncClient() as client:
         await client.post(url, headers={"Authorization": f"Bearer {token}"}, json=payload)
+    return seen_at
 
 async def main():
     token = await get_fresh_token()
@@ -134,34 +137,20 @@ async def main():
         save_search_usage(0)
         print("📅 Search counter reset")
 
+    # ✅ Mark ALL notifications as read FIRST
+    seen_at = await mark_all_notifications_read(token)
+    print(f"✅ All notifications marked as read (up to {seen_at})")
+
+    # Now fetch notifications (API will still return recent ones)
     url = "https://bsky.social/xrpc/app.bsky.notification.listNotifications"
     async with httpx.AsyncClient() as client:
         r = await client.get(url, headers={"Authorization": f"Bearer {token}"})
-        data = r.json()
-        notifications = data.get("notifications", [])
-        cursor = data.get("cursor")
+        notifications = r.json().get("notifications", [])
 
-    print(f"📥 Found {len(notifications)} notifications (cursor: {cursor})")
-
-    if not notifications:
-        print("ℹ️ No notifications found")
-        return
-
-    # Filter ONLY unread notifications
-    unread_notifs = [n for n in notifications if not n.get("isRead")]
-    print(f"🔍 Processing {len(unread_notifs)} unread notifications")
-
-    if not unread_notifs:
-        # Mark all as read if none are unread
-        latest = max(notifications, key=lambda x: x.get("indexedAt", ""))
-        await mark_notifications_as_read(token, latest.get("indexedAt"))
-        print(f"✅ Marked all notifications as read (up to {latest.get('indexedAt')})")
-        return
+    print(f"📥 Found {len(notifications)} recent notifications")
 
     processed_count = 0
-    latest_indexed_at = None
-
-    for notif in unread_notifs:
+    for notif in notifications:
         author_did = notif.get("author", {}).get("did", "")
         if author_did != OWNER_DID:
             continue
@@ -175,39 +164,28 @@ async def main():
             continue
 
         txt = record.get("text", "").strip()
-        if not txt:
+        uri = notif.get("uri", "")
+
+        if not txt or not uri:
             continue
 
-        uri = notif.get("uri", "")
-        indexed_at = notif.get("indexedAt")
-
-        print(f"\n📝 Notification: {indexed_at}")
-        print(f"   Author: {author_did}")
+        print(f"\n🔍 Processing notification from {author_did}")
         print(f"   Reason: {reason}")
         print(f"   Text: '{txt}'")
 
         parent_text = await get_parent_post_text(uri, token)
+        prompt = f"User says: '{txt}'. Respond helpfully."
         if parent_text:
             prompt = f"User replied to: '{parent_text}'. Comment: '{txt}'. Respond helpfully."
-        else:
-            prompt = f"User says: '{txt}'. Respond helpfully."
 
         reply = ask_local(prompt)
         await post_reply(reply, uri, token)
         print(f"✅ Replied: '{reply}'")
 
         processed_count += 1
-        if latest_indexed_at is None or indexed_at > latest_indexed_at:
-            latest_indexed_at = indexed_at
-
         delay = random.randint(60, 120)
-        print(f"⏳ Waiting {delay} seconds...")
+        print(f"⏳ Waiting {delay} seconds before next reply...")
         await asyncio.sleep(delay)
-
-    # ✅ Mark ONLY processed notifications as read
-    if latest_indexed_at:
-        await mark_notifications_as_read(token, latest_indexed_at)
-        print(f"✅ Marked notifications up to {latest_indexed_at} as read")
 
     print(f"🎉 Done: {processed_count} replies sent")
 
