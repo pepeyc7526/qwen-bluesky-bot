@@ -1,6 +1,6 @@
 # 🤖 Qwen2 Bluesky AI Bot
 
-A private, self-hosted AI assistant for [Bluesky](https://bsky.app) powered by the open-source **Qwen2-7B** model.  
+A private, self-hosted AI assistant for **Bluesky** powered by the open-source **Qwen2-7B** model.  
 Runs entirely on free infrastructure. No external APIs. Full user control.
 
 ---
