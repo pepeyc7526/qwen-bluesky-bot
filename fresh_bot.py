@@ -22,11 +22,8 @@ def load_last_processed():
             data = json.load(f)
             return data.get("indexedAt", "1970-01-01T00:00:00.000Z")
     else:
-        # ✅ Initialize with current time if file doesn't exist
-        now = datetime.datetime.utcnow().isoformat() + "Z"
-        save_last_processed(now)
-        print(f"🆕 Initialized last_processed.json with current time: {now}")
-        return now
+        # Return epoch time if file doesn't exist (won't create it)
+        return "1970-01-01T00:00:00.000Z"
 
 def save_last_processed(indexed_at):
     with open(LAST_PROCESSED_FILE, "w") as f:
@@ -115,12 +112,12 @@ def ask_local(prompt: str) -> str:
     full_prompt = ""
     for msg in messages:
         if msg["role"] == "user":
-            full_prompt += "                                      <|im_start|>user\n" + msg['content'] + " <|im_end|>\n"
+            full_prompt += "                                         <|im_start|>user\n" + msg['content'] + "   <|im_end|>\n"
         elif msg["role"] == "assistant":
-            full_prompt += "                                      <|im_start|>assistant\n" + msg['content'] + " <|im_end|>\n"
+            full_prompt += "                                         <|im_start|>assistant\n" + msg['content'] + "   <|im_end|>\n"
         else:
-            full_prompt += "                                      <|im_start|>system\n" + msg['content'] + " <|im_end|>\n"
-    full_prompt += "                                      <|im_start|>assistant\n"
+            full_prompt += "                                         <|im_start|>system\n" + msg['content'] + "   <|im_end|>\n"
+    full_prompt += "                                         <|im_start|>assistant\n"
 
     out = llm(
         full_prompt,
@@ -225,13 +222,14 @@ async def main():
         print(f"⏳ Waiting {delay} seconds...")
         await asyncio.sleep(delay)
 
-    # Save state
-    save_last_processed(latest_processed)
-    print(f"💾 Saved last processed time: {latest_processed}")
+    # Save state ONLY if we processed something
+    if latest_processed != last_indexed_at:
+        save_last_processed(latest_processed)
+        print(f"💾 Saved last processed time: {latest_processed}")
 
     # Reset UI counter
-    await mark_notifications_as_read(token, latest_processed)
-    print(f"✅ UI counter reset (marked up to {latest_processed})")
+    await mark_notifications_as_read(token, latest_processed if new_notifs else last_indexed_at)
+    print(f"✅ UI counter reset")
 
     print(f"🎉 Done: {processed_count} replies sent")
 
