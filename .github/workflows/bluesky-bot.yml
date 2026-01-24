@@ -66,7 +66,7 @@ jobs:
 
       - name: Commit state files
         run: |
-          git add search_usage.json processed_notif_keys.json 2>/dev/null || true
+          git add search_usage.json last_processed.json 2>/dev/null || true
           if ! git diff --cached --quiet; then
             git config user.email "actions@github.com"
             git config user.name "GitHub Actions"
