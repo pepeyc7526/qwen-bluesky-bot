@@ -18,9 +18,13 @@ llm = Llama(model_path=MODEL_PATH, n_ctx=2048, n_threads=2, verbose=False)
 
 def load_last_processed():
     if os.path.exists(LAST_PROCESSED_FILE):
-        with open(LAST_PROCESSED_FILE, "r") as f:
-            data = json.load(f)
-            return data.get("indexedAt", "1970-01-01T00:00:00.000Z")
+        try:
+            with open(LAST_PROCESSED_FILE, "r") as f:
+                data = json.load(f)
+                return data.get("indexedAt", "1970-01-01T00:00:00.000Z")
+        except (json.JSONDecodeError, ValueError) as e:
+            print(f"[WARNING] Invalid JSON in {LAST_PROCESSED_FILE}: {e}. Using default timestamp.")
+            return "1970-01-01T00:00:00.000Z"
     else:
         return "1970-01-01T00:00:00.000Z"
 
@@ -30,8 +34,12 @@ def save_last_processed(indexed_at):
 
 def load_search_usage():
     if os.path.exists(SEARCH_USAGE_FILE):
-        with open(SEARCH_USAGE_FILE, "r") as f:
-            return json.load(f)
+        try:
+            with open(SEARCH_USAGE_FILE, "r") as f:
+                return json.load(f)
+        except (json.JSONDecodeError, ValueError):
+            print(f"[WARNING] Invalid JSON in {SEARCH_USAGE_FILE}. Using default values.")
+            return {"count": 0, "month": datetime.datetime.now().month}
     return {"count": 0, "month": datetime.datetime.now().month}
 
 def save_search_usage(count: int):
@@ -51,18 +59,7 @@ async def get_fresh_token() -> str:
         r = await client.post(url, json=payload, timeout=30.0)
         return r.json()["accessJwt"]
 
-async def post_reply(text: str, reply_to_uri: str, token: str):
-    try:
-        parts = reply_to_uri.split("/")
-        repo, collection, rkey = parts[2], parts[3], parts[4]
-        url = f"https://bsky.social/xrpc/com.atproto.repo.getRecord?repo={repo}&collection={collection}&rkey={rkey}"
-        async with httpx.AsyncClient() as client:
-            r = await client.get(url, headers={"Authorization": f"Bearer {token}"}, timeout=30.0)
-            cid = r.json()["cid"]
-    except Exception as e:
-        print(f"[CID ERROR] {e}")
-        cid = "bafyreihjdbd4zq4f4a5v6w5z5g5q5j5j5j5j5j5j5j5j5j5j5j5j5j5j5j5j5j"
-
+async def post_reply(text: str, root_uri: str, root_cid: str, parent_uri: str, parent_cid: str, token: str):
     url = "https://bsky.social/xrpc/com.atproto.repo.createRecord"
     payload = {
         "repo": BOT_DID,
@@ -71,8 +68,8 @@ async def post_reply(text: str, reply_to_uri: str, token: str):
             "$type": "app.bsky.feed.post",
             "text": text,
             "reply": {
-                "root": {"uri": reply_to_uri, "cid": cid},
-                "parent": {"uri": reply_to_uri, "cid": cid}
+                "root": {"uri": root_uri, "cid": root_cid},
+                "parent": {"uri": parent_uri, "cid": parent_cid}
             },
             "createdAt": datetime.datetime.utcnow().isoformat() + "Z"
         }
@@ -80,7 +77,8 @@ async def post_reply(text: str, reply_to_uri: str, token: str):
     async with httpx.AsyncClient() as client:
         await client.post(url, headers={"Authorization": f"Bearer {token}"}, json=payload, timeout=30.0)
 
-async def get_parent_post_text(uri: str, token: str) -> str:
+async def get_thread_metadata(uri: str, token: str):
+    """Returns (root_uri, root_cid, parent_uri, parent_cid) for a thread"""
     try:
         parts = uri.split("/")
         repo, rkey = parts[2], parts[4]
@@ -89,18 +87,37 @@ async def get_parent_post_text(uri: str, token: str) -> str:
             r = await client.get(url, headers={"Authorization": f"Bearer {token}"}, timeout=30.0)
             record = r.json().get("value", {})
             reply = record.get("reply")
-            if not reply or "parent" not in reply:
-                return ""
+            
+            if not reply or "root" not in reply or "parent" not in reply:
+                # Это корневой пост
+                return uri, record["cid"], uri, record["cid"]
+            
+            root_uri = reply["root"]["uri"]
             parent_uri = reply["parent"]["uri"]
-            parent_parts = parent_uri.split("/")
-            parent_repo, parent_rkey = parent_parts[2], parent_parts[4]
-            parent_url = f"https://bsky.social/xrpc/com.atproto.repo.getRecord?repo={parent_repo}&collection=app.bsky.feed.post&rkey={parent_rkey}"
-            r2 = await client.get(parent_url, headers={"Authorization": f"Bearer {token}"}, timeout=30.0)
-            parent_record = r2.json().get("value", {})
-            return parent_record.get("text", "")
+            
+            # Get root CID
+            root_parts = root_uri.split("/")
+            root_repo, root_rkey = root_parts[2], root_parts[4]
+            root_url = f"https://bsky.social/xrpc/com.atproto.repo.getRecord?repo={root_repo}&collection=app.bsky.feed.post&rkey={root_rkey}"
+            r_root = await client.get(root_url, headers={"Authorization": f"Bearer {token}"}, timeout=30.0)
+            root_cid = r_root.json()["cid"]
+            
+            # Get parent CID (if different from root)
+            if parent_uri == root_uri:
+                parent_cid = root_cid
+            else:
+                parent_parts = parent_uri.split("/")
+                parent_repo, parent_rkey = parent_parts[2], parent_parts[4]
+                parent_url = f"https://bsky.social/xrpc/com.atproto.repo.getRecord?repo={parent_repo}&collection=app.bsky.feed.post&rkey={parent_rkey}"
+                r_parent = await client.get(parent_url, headers={"Authorization": f"Bearer {token}"}, timeout=30.0)
+                parent_cid = r_parent.json()["cid"]
+            
+            return root_uri, root_cid, parent_uri, parent_cid
     except Exception as e:
-        print(f"[PARENT ERROR] {e}")
-        return ""
+        print(f"[THREAD ERROR] {e}")
+        # Fallback to self-reference
+        fallback_cid = "bafyreihjdbd4zq4f4a5v6w5z5g5q5j5j5j5j5j5j5j5j5j5j5j5j5j5j5j5j5j"
+        return uri, fallback_cid, uri, fallback_cid
 
 def ask_local(prompt: str) -> str:
     # Replace bot's handle with "you" to avoid self-reference
@@ -114,12 +131,12 @@ def ask_local(prompt: str) -> str:
     full_prompt = ""
     for msg in messages:
         if msg["role"] == "user":
-            full_prompt += "                                          <|im_start|>user\n" + msg['content'] + "    <|im_end|>\n"
+            full_prompt += "                                           <|im_start|>user\n" + msg['content'] + "     <|im_end|>\n"
         elif msg["role"] == "assistant":
-            full_prompt += "                                          <|im_start|>assistant\n" + msg['content'] + "    <|im_end|>\n"
+            full_prompt += "                                           <|im_start|>assistant\n" + msg['content'] + "     <|im_end|>\n"
         else:
-            full_prompt += "                                          <|im_start|>system\n" + msg['content'] + "    <|im_end|>\n"
-    full_prompt += "                                          <|im_start|>assistant\n"
+            full_prompt += "                                           <|im_start|>system\n" + msg['content'] + "     <|im_end|>\n"
+    full_prompt += "                                           <|im_start|>assistant\n"
 
     out = llm(
         full_prompt,
@@ -211,13 +228,36 @@ async def main():
 
         print(f"\n📬 Processing: {indexed_at} | {reason} | '{txt[:50]}...'")
 
-        parent_text = await get_parent_post_text(uri, token)
+        # Get thread metadata for proper reply structure
+        root_uri, root_cid, parent_uri, parent_cid = await get_thread_metadata(uri, token)
+        
+        # Get parent text for context if needed
+        parent_text = ""
+        try:
+            parts = uri.split("/")
+            repo, rkey = parts[2], parts[4]
+            url = f"https://bsky.social/xrpc/com.atproto.repo.getRecord?repo={repo}&collection=app.bsky.feed.post&rkey={rkey}"
+            async with httpx.AsyncClient() as client:
+                r = await client.get(url, headers={"Authorization": f"Bearer {token}"}, timeout=30.0)
+                record = r.json().get("value", {})
+                reply = record.get("reply")
+                if reply and "parent" in reply:
+                    parent_uri_inner = reply["parent"]["uri"]
+                    parent_parts = parent_uri_inner.split("/")
+                    parent_repo, parent_rkey = parent_parts[2], parent_parts[4]
+                    parent_url = f"https://bsky.social/xrpc/com.atproto.repo.getRecord?repo={parent_repo}&collection=app.bsky.feed.post&rkey={parent_rkey}"
+                    r2 = await client.get(parent_url, headers={"Authorization": f"Bearer {token}"}, timeout=30.0)
+                    parent_record = r2.json().get("value", {})
+                    parent_text = parent_record.get("text", "")
+        except Exception as e:
+            print(f"[PARENT TEXT ERROR] {e}")
+
         prompt = f"User says: '{txt}'. Respond helpfully."
         if parent_text:
             prompt = f"User replied to: '{parent_text}'. Comment: '{txt}'. Respond helpfully."
 
         reply = ask_local(prompt)
-        await post_reply(reply, uri, token)
+        await post_reply(reply, root_uri, root_cid, parent_uri, parent_cid, token)
         print(f"✅ Replied: '{reply}'")
 
         processed_count += 1
@@ -234,8 +274,9 @@ async def main():
         print(f"💾 Saved last processed time: {latest_processed}")
 
     # Reset UI counter
-    await mark_notifications_as_read(token, latest_processed if new_notifs else last_indexed_at)
-    print(f"✅ UI counter reset")
+    final_seen_at = latest_processed if new_notifs else last_indexed_at
+    await mark_notifications_as_read(token, final_seen_at)
+    print(f"✅ UI counter reset (marked up to {final_seen_at})")
 
     print(f"🎉 Done: {processed_count} replies sent")
 
