@@ -59,18 +59,6 @@ async def get_fresh_token() -> str:
         r = await client.post(url, json=payload, timeout=30.0)
         return r.json()["accessJwt"]
 
-async def get_cid(uri: str, token: str) -> str:
-    try:
-        parts = uri.split("/")
-        repo, collection, rkey = parts[2], parts[3], parts[4]
-        url = f"https://bsky.social/xrpc/com.atproto.repo.getRecord?repo={repo}&collection={collection}&rkey={rkey}"
-        async with httpx.AsyncClient() as client:
-            r = await client.get(url, headers={"Authorization": f"Bearer {token}"}, timeout=30.0)
-            return r.json().get("cid", "bafyreihjdbd4zq4f4a5v6w5z5g5q5j5j5j5j5j5j5j5j5j5j5j5j5j5j5j5j5j")
-    except Exception as e:
-        print(f"[CID ERROR] {e}")
-        return "bafyreihjdbd4zq4f4a5v6w5z5g5q5j5j5j5j5j5j5j5j5j5j5j5j5j5j5j5j5j"
-
 async def post_reply(text: str, root_uri: str, root_cid: str, parent_uri: str, parent_cid: str, token: str):
     url = "https://bsky.social/xrpc/com.atproto.repo.createRecord"
     payload = {
@@ -90,7 +78,7 @@ async def post_reply(text: str, root_uri: str, root_cid: str, parent_uri: str, p
         await client.post(url, headers={"Authorization": f"Bearer {token}"}, json=payload, timeout=30.0)
 
 async def get_thread_metadata(uri: str, token: str):
-    """Returns only root_uri and root_cid (parent_uri is now handled separately)"""
+    """Returns root_uri, root_cid, parent_uri, parent_cid for a thread"""
     try:
         parts = uri.split("/")
         repo, rkey = parts[2], parts[4]
@@ -100,23 +88,32 @@ async def get_thread_metadata(uri: str, token: str):
             record = r.json().get("value", {})
             reply = record.get("reply")
             
-            if not reply or "root" not in reply:
+            if not reply or "root" not in reply or "parent" not in reply:
                 # This is a root post
-                return uri, record.get("cid", "bafyreihjdbd4zq4f4a5v6w5z5g5q5j5j5j5j5j5j5j5j5j5j5j5j5j5j5j5j5j")
+                return uri, record["cid"], uri, record["cid"]
             
             root_uri = reply["root"]["uri"]
+            parent_uri = reply["parent"]["uri"]
+            
+            # Get root CID
             root_parts = root_uri.split("/")
             root_repo, root_rkey = root_parts[2], root_parts[4]
             root_url = f"https://bsky.social/xrpc/com.atproto.repo.getRecord?repo={root_repo}&collection=app.bsky.feed.post&rkey={root_rkey}"
             r_root = await client.get(root_url, headers={"Authorization": f"Bearer {token}"}, timeout=30.0)
-            root_record = r_root.json().get("value", {})
-            root_cid = root_record.get("cid", "bafyreihjdbd4zq4f4a5v6w5z5g5q5j5j5j5j5j5j5j5j5j5j5j5j5j5j5j5j5j")
+            root_cid = r_root.json()["cid"]
             
-            return root_uri, root_cid
+            # Get parent CID
+            parent_parts = parent_uri.split("/")
+            parent_repo, parent_rkey = parent_parts[2], parent_parts[4]
+            parent_url = f"https://bsky.social/xrpc/com.atproto.repo.getRecord?repo={parent_repo}&collection=app.bsky.feed.post&rkey={parent_rkey}"
+            r_parent = await client.get(parent_url, headers={"Authorization": f"Bearer {token}"}, timeout=30.0)
+            parent_cid = r_parent.json()["cid"]
+            
+            return root_uri, root_cid, parent_uri, parent_cid
     except Exception as e:
         print(f"[THREAD ERROR] {e}")
         fallback_cid = "bafyreihjdbd4zq4f4a5v6w5z5g5q5j5j5j5j5j5j5j5j5j5j5j5j5j5j5j5j5j"
-        return uri, fallback_cid
+        return uri, fallback_cid, uri, fallback_cid
 
 async def get_parent_post_text(uri: str, token: str) -> str:
     try:
@@ -152,12 +149,12 @@ def ask_local(prompt: str) -> str:
     full_prompt = ""
     for msg in messages:
         if msg["role"] == "user":
-            full_prompt += "                                            <|im_start|>user\n" + msg['content'] + "      <|im_end|>\n"
+            full_prompt += "                                              <|im_start|>user\n" + msg['content'] + "        <|im_end|> \n"
         elif msg["role"] == "assistant":
-            full_prompt += "                                            <|im_start|>assistant\n" + msg['content'] + "      <|im_end|>\n"
+            full_prompt += "                                              <|im_start|>assistant\n" + msg['content'] + "        <|im_end|> \n"
         else:
-            full_prompt += "                                            <|im_start|>system\n" + msg['content'] + "      <|im_end|>\n"
-    full_prompt += "                                            <|im_start|>assistant\n"
+            full_prompt += "                                              <|im_start|>system\n" + msg['content'] + "        <|im_end|> \n"
+    full_prompt += "                                              <|im_start|>assistant\n"
 
     out = llm(
         full_prompt,
@@ -249,14 +246,11 @@ async def main():
 
         print(f"\n📬 Processing: {indexed_at} | {reason} | '{txt[:50]}...'")
 
-        # Get current CID for the notification URI (user's comment)
-        current_cid = await get_cid(uri, token)
+        # Get full thread structure
+        root_uri, root_cid, parent_uri, parent_cid = await get_thread_metadata(uri, token)
         
-        # Get root_uri and root_cid for thread structure
-        root_uri, root_cid = await get_thread_metadata(uri, token)
-        
-        # For replies, parent should be the user's comment URI, not its parent
-        parent_uri = uri
+        # Log the structure for debugging
+        print(f"🔗 Thread structure: root={root_uri.split('/')[-1]}, parent={parent_uri.split('/')[-1]}")
         
         # Get parent text for context if needed
         parent_text = await get_parent_post_text(uri, token)
@@ -265,8 +259,8 @@ async def main():
             prompt = f"User replied to: '{parent_text}'. Comment: '{txt}'. Respond helpfully."
 
         reply = ask_local(prompt)
-        await post_reply(reply, root_uri, root_cid, parent_uri, current_cid, token)
-        print(f"✅ Replied directly to user's comment: '{reply}'")
+        await post_reply(reply, root_uri, root_cid, parent_uri, parent_cid, token)
+        print(f"✅ Replied to user's comment: '{reply}'")
 
         processed_count += 1
         if indexed_at > latest_processed:
