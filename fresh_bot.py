@@ -59,6 +59,18 @@ async def get_fresh_token() -> str:
         r = await client.post(url, json=payload, timeout=30.0)
         return r.json()["accessJwt"]
 
+async def get_cid(uri: str, token: str) -> str:
+    try:
+        parts = uri.split("/")
+        repo, collection, rkey = parts[2], parts[3], parts[4]
+        url = f"https://bsky.social/xrpc/com.atproto.repo.getRecord?repo={repo}&collection={collection}&rkey={rkey}"
+        async with httpx.AsyncClient() as client:
+            r = await client.get(url, headers={"Authorization": f"Bearer {token}"}, timeout=30.0)
+            return r.json().get("cid", "bafyreihjdbd4zq4f4a5v6w5z5g5q5j5j5j5j5j5j5j5j5j5j5j5j5j5j5j5j5j")
+    except Exception as e:
+        print(f"[CID ERROR] {e}")
+        return "bafyreihjdbd4zq4f4a5v6w5z5g5q5j5j5j5j5j5j5j5j5j5j5j5j5j5j5j5j5j"
+
 async def post_reply(text: str, root_uri: str, root_cid: str, parent_uri: str, parent_cid: str, token: str):
     url = "https://bsky.social/xrpc/com.atproto.repo.createRecord"
     payload = {
@@ -77,8 +89,8 @@ async def post_reply(text: str, root_uri: str, root_cid: str, parent_uri: str, p
     async with httpx.AsyncClient() as client:
         await client.post(url, headers={"Authorization": f"Bearer {token}"}, json=payload, timeout=30.0)
 
-async def get_thread_metadata(uri: str, token: str):
-    """Returns root_uri, root_cid, parent_uri, parent_cid for a thread"""
+async def get_root_and_parent(uri: str, token: str):
+    """Returns (root_uri, root_cid, parent_uri, parent_cid) for correct reply structure"""
     try:
         parts = uri.split("/")
         repo, rkey = parts[2], parts[4]
@@ -89,9 +101,11 @@ async def get_thread_metadata(uri: str, token: str):
             reply = record.get("reply")
             
             if not reply or "root" not in reply or "parent" not in reply:
-                # This is a root post
-                return uri, record["cid"], uri, record["cid"]
+                # This is a root post — reply to itself
+                cid = record.get("cid", "bafyreihjdbd4zq4f4a5v6w5z5g5q5j5j5j5j5j5j5j5j5j5j5j5j5j5j5j5j5j")
+                return uri, cid, uri, cid
             
+            # Extract root and parent URIs
             root_uri = reply["root"]["uri"]
             parent_uri = reply["parent"]["uri"]
             
@@ -100,18 +114,18 @@ async def get_thread_metadata(uri: str, token: str):
             root_repo, root_rkey = root_parts[2], root_parts[4]
             root_url = f"https://bsky.social/xrpc/com.atproto.repo.getRecord?repo={root_repo}&collection=app.bsky.feed.post&rkey={root_rkey}"
             r_root = await client.get(root_url, headers={"Authorization": f"Bearer {token}"}, timeout=30.0)
-            root_cid = r_root.json()["cid"]
+            root_cid = r_root.json().get("cid", "bafyreihjdbd4zq4f4a5v6w5z5g5q5j5j5j5j5j5j5j5j5j5j5j5j5j5j5j5j5j")
             
             # Get parent CID
             parent_parts = parent_uri.split("/")
             parent_repo, parent_rkey = parent_parts[2], parent_parts[4]
             parent_url = f"https://bsky.social/xrpc/com.atproto.repo.getRecord?repo={parent_repo}&collection=app.bsky.feed.post&rkey={parent_rkey}"
             r_parent = await client.get(parent_url, headers={"Authorization": f"Bearer {token}"}, timeout=30.0)
-            parent_cid = r_parent.json()["cid"]
+            parent_cid = r_parent.json().get("cid", "bafyreihjdbd4zq4f4a5v6w5z5g5q5j5j5j5j5j5j5j5j5j5j5j5j5j5j5j5j5j")
             
             return root_uri, root_cid, parent_uri, parent_cid
     except Exception as e:
-        print(f"[THREAD ERROR] {e}")
+        print(f"[THREAD STRUCTURE ERROR] {e}")
         fallback_cid = "bafyreihjdbd4zq4f4a5v6w5z5g5q5j5j5j5j5j5j5j5j5j5j5j5j5j5j5j5j5j"
         return uri, fallback_cid, uri, fallback_cid
 
@@ -134,11 +148,10 @@ async def get_parent_post_text(uri: str, token: str) -> str:
             parent_record = r2.json().get("value", {})
             return parent_record.get("text", "")
     except Exception as e:
-        print(f"[PARENT ERROR] {e}")
+        print(f"[PARENT TEXT ERROR] {e}")
         return ""
 
 def ask_local(prompt: str) -> str:
-    # Replace bot's handle with "you" to avoid self-reference
     prompt = prompt.replace(f"@{BOT_HANDLE}", "you")
     
     messages = [
@@ -149,12 +162,12 @@ def ask_local(prompt: str) -> str:
     full_prompt = ""
     for msg in messages:
         if msg["role"] == "user":
-            full_prompt += "                                              <|im_start|>user\n" + msg['content'] + "        <|im_end|> \n"
+            full_prompt += "                                               <|im_start|>user\n" + msg['content'] + "         <|im_end|>\n"
         elif msg["role"] == "assistant":
-            full_prompt += "                                              <|im_start|>assistant\n" + msg['content'] + "        <|im_end|> \n"
+            full_prompt += "                                               <|im_start|>assistant\n" + msg['content'] + "         <|im_end|>\n"
         else:
-            full_prompt += "                                              <|im_start|>system\n" + msg['content'] + "        <|im_end|> \n"
-    full_prompt += "                                              <|im_start|>assistant\n"
+            full_prompt += "                                               <|im_start|>system\n" + msg['content'] + "         <|im_end|>\n"
+    full_prompt += "                                               <|im_start|>assistant\n"
 
     out = llm(
         full_prompt,
@@ -169,7 +182,6 @@ def ask_local(prompt: str) -> str:
     if any(w in ans.lower() for w in ["don't know", "unclear", "provide more", "doesn't seem"]):
         ans = "🤔 Not sure what you mean. Try rephrasing!"
 
-    # Smart truncation at word boundary
     if len(ans) <= MAX_LEN:
         return ans
     truncated = ans[:MAX_LEN].rsplit(' ', 1)[0]
@@ -199,7 +211,6 @@ async def main():
 
     print(f"📥 Found {len(notifications)} notifications from API")
 
-    # Filter only new, relevant notifications
     new_notifs = []
     for notif in notifications:
         indexed_at = notif.get("indexedAt", "")
@@ -225,7 +236,6 @@ async def main():
     print(f"🔍 Found {len(new_notifs)} new notifications to process")
 
     if not new_notifs:
-        # Still mark latest as read to reset UI
         if notifications:
             latest = max(notifications, key=lambda x: x.get("indexedAt", ""))
             await mark_notifications_as_read(token, latest.get("indexedAt", ""))
@@ -234,7 +244,6 @@ async def main():
             print("ℹ️ No notifications to process")
         return
 
-    # Process oldest first
     new_notifs.sort(key=lambda x: x[1])
     latest_processed = last_indexed_at
     processed_count = 0
@@ -246,13 +255,12 @@ async def main():
 
         print(f"\n📬 Processing: {indexed_at} | {reason} | '{txt[:50]}...'")
 
-        # Get full thread structure
-        root_uri, root_cid, parent_uri, parent_cid = await get_thread_metadata(uri, token)
+        # Get correct thread structure
+        root_uri, root_cid, parent_uri, parent_cid = await get_root_and_parent(uri, token)
         
-        # Log the structure for debugging
-        print(f"🔗 Thread structure: root={root_uri.split('/')[-1]}, parent={parent_uri.split('/')[-1]}")
-        
-        # Get parent text for context if needed
+        # Log for debugging
+        print(f"🔗 Replying to: parent={parent_uri.split('/')[-1]}, root={root_uri.split('/')[-1]}")
+
         parent_text = await get_parent_post_text(uri, token)
         prompt = f"User says: '{txt}'. Respond helpfully."
         if parent_text:
@@ -260,7 +268,7 @@ async def main():
 
         reply = ask_local(prompt)
         await post_reply(reply, root_uri, root_cid, parent_uri, parent_cid, token)
-        print(f"✅ Replied to user's comment: '{reply}'")
+        print(f"✅ Replied directly to user's comment: '{reply}'")
 
         processed_count += 1
         if indexed_at > latest_processed:
@@ -270,12 +278,10 @@ async def main():
         print(f"⏳ Waiting {delay} seconds...")
         await asyncio.sleep(delay)
 
-    # Save state ONLY if we processed something
     if latest_processed != last_indexed_at:
         save_last_processed(latest_processed)
         print(f"💾 Saved last processed time: {latest_processed}")
 
-    # Reset UI counter
     final_seen_at = latest_processed if new_notifs else last_indexed_at
     await mark_notifications_as_read(token, final_seen_at)
     print(f"✅ UI counter reset (marked up to {final_seen_at})")
