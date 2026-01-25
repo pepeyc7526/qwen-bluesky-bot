@@ -34,6 +34,37 @@ The bot only responds to **its owner** (verified by DID). You can:
 
 ---
 
+# 🤖 Qwen-Bluesky Bot
+
+A minimalist, self-hosted AI assistant for Bluesky that replies to your mentions using **Qwen2-7B**. Runs in GitHub Actions with persistent state.
+
+---
+
+## ✨ Features
+- **Customizable personality** via system prompt  
+  *(official, humorous, analytical, or ultra-minimalist)*
+- **State persistence** between runs using JSON files
+- **Smart reply threading** (handles nested conversations)
+- **Rate-limited posting** (60-120s delays to avoid spam)
+- **Automatic monthly usage tracking**
+- **Zero external dependencies** (runs on CPU-only machines)
+
+---
+
+## 🛠️ Quick Setup
+1. Fork this repo
+2. Add secrets: `BOT_HANDLE`, `BOT_PASSWORD`, `BOT_DID`, `OWNER_DID`
+3. Place your `qwen2-7b-instruct-q4_k_m.gguf` in `/models`
+4. Enable GitHub Actions
+
+[![GitHub Actions](https://img.shields.io/github/actions/workflow/status/pepeyc7526/qwen-bluesky-bot/bluesky-bot.yml?style=flat&logo=github)](https://github.com/pepeyc7526/qwen-bluesky-bot/actions)
+[![Python](https://img.shields.io/badge/Python-3.10+-blue?logo=python)](https://python.org)
+[![LLM](https://img.shields.io/badge/Qwen2--7B-GGUF-8A2BE2)](https://huggingface.co/Qwen/Qwen2-7B-Instruct)
+[![License](https://img.shields.io/github/license/pepeyc7526/qwen-bluesky-bot?color=green)](LICENSE)
+![Bluesky](https://img.shields.io/badge/Bluesky-%23F3F9FF?logo=data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCI+PHBhdGggZmlsbD0iIzYzNjdGRiIgZD0iTTEyIDIuNjY3YTkuMzMzIDkuMzMzIDAgMDE5LjMzMyA5LjMzMyA5LjMzMyA5LjMzMyAwIDAxLTkuMzMzIDkuMzMzIDkuMzMzIDkuMzMzIDAgMDEtOS4zMzMtOS4zMzMgOS4)
+
+---
+
 ## ⚙️ Setup
 
 1. **Fork this repository**
