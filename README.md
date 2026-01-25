@@ -76,18 +76,46 @@ The bot only responds to **its owner** (verified by DID). You can:
 
 ---
 
-## ⏳ How to Adjust Run Frequency
+🎮 One-Click Manual Runs (Browser Extension)
 
-The bot runs on a **scheduled cron job**. You can change the frequency by editing `.github/workflows/bluesky-bot.yml`.
+By default, scheduled runs are disabled to give you full control and avoid hitting GitHub Actions limits.
 
----
+🔧 Current setup
+In .github/workflows/bluesky-bot.yml, the cron schedule is commented out:
 
-### Current Schedule: 1 time per hour
-```yaml
 on:
-  schedule:
-    - cron: '0 * * * *'
-```
+
+    # schedule:
+    #   - cron: '0 * * * *'
+  
+  workflow_dispatch:
+
+This means the bot only runs when you trigger it manually.
+
+🚀 Option 1: Use the Browser Extension (Recommended)
+Install the official extension: https://github.com/pepeyc7526/qwen-bluesky-bot-extension
+Click its icon → "Run Bluesky Bot"
+Done! No cron, no limits, instant runs.
+
+💡 Why? GitHub Actions has a hard limit of once every 20 minutes for scheduled workflows. The extension bypasses this by using manual triggers (workflow_dispatch), giving you true on-demand control.
+
+⏱️ Option 2: Enable Automatic Hourly Runs
+If you prefer automatic runs (once per hour):
+Open .github/workflows/bluesky-bot.yml
+Uncomment these lines:
+
+    # schedule:
+    #   - cron: '0 * * * *'
+
+→ becomes:
+
+    schedule:
+      - cron: '0 * * * *'
+
+Commit the change
+
+⚠️ Note: Even with cron enabled, you can still use the extension for instant runs between scheduled intervals.
+
 ---
 
 ## 📦 Tech Stack
