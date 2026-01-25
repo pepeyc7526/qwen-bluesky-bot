@@ -1,2 +1,2 @@
-llama-cpp-python>=0.2.0
-httpx>=0.25.0
+httpx
+llama-cpp-python==0.2.89
