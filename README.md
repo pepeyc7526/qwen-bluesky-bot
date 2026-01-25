@@ -40,12 +40,6 @@ The bot only responds to **its owner** (verified by DID). You can:
 
 ---
 
-# 🤖 Qwen-Bluesky Bot
-
-A minimalist, self-hosted AI assistant for Bluesky that replies to your mentions using **Qwen2-7B**. Runs in GitHub Actions with persistent state.
-
----
-
 ## ✨ Features
 - **Customizable personality** via system prompt  
   *(official, humorous, analytical, or ultra-minimalist)*
