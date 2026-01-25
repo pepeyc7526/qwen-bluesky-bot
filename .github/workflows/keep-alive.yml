@@ -1,0 +1,19 @@
+name: Keep Alive
+on:
+  schedule:
+    - cron: '0 0 1 * *'  # 1-го числа каждого месяца
+
+jobs:
+  keep-alive:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger self-push
+        run: |
+          git config --global user.email "actions@github.com"
+          git config --global user.name "GitHub Actions"
+          git clone https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git
+          cd $(basename ${{ github.repository }})
+          echo "$(date)" > .github/keepalive.txt
+          git add .github/keepalive.txt
+          git commit -m "chore: keep-alive $(date)" || exit 0
+          git push
