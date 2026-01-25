@@ -1,4 +1,2 @@
-*.pyc
 __pycache__/
-.cache/
-.tmp_files_ignore
+*.pyc
