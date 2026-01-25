@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Bluesky Bot Controller</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, sans-serif; max-width: 600px; margin: 40px auto; padding: 20px; }
+    .card { background: #f8f9fa; padding: 20px; border-radius: 12px; margin-bottom: 20px; }
+    input, button { width: 100%; padding: 12px; margin: 8px 0; border: 1px solid #ddd; border-radius: 6px; }
+    button { background: #0070f3; color: white; cursor: pointer; font-weight: bold; }
+    button:hover { background: #005fcc; }
+    button:disabled { background: #ccc; cursor: not-allowed; }
+    #status { padding: 12px; border-radius: 6px; margin-top: 10px; }
+    .success { background: #d4edda; color: #155724; }
+    .error { background: #f8d7da; color: #721c24; }
+  </style>
+</head>
+<body>
+  <h1>🤖 Bluesky Bot Controller</h1>
+  
+  <div class="card">
+    <input type="text" id="repo" placeholder="GitHub repo (e.g. pepeyc7526/qwen-bluesky-bot)" value="">
+    <input type="password" id="token" placeholder="GitHub Personal Access Token (repo scope)">
+    <button onclick="saveConfig()">💾 Save Config</button>
+  </div>
+
+  <div class="card">
+    <button onclick="runWorkflow()" id="runBtn">▶️ Run Bot Now</button>
+    <button onclick="togglePause(true)" id="pauseBtn">⏸️ Pause All Actions</button>
+    <button onclick="togglePause(false)" id="resumeBtn">▶️ Resume Actions</button>
+    <div id="status"></div>
+  </div>
+
+  <script src="controller.js"></script>
+</body>
+</html>
