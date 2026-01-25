@@ -89,8 +89,8 @@ async def post_reply(text: str, root_uri: str, root_cid: str, parent_uri: str, p
     async with httpx.AsyncClient() as client:
         await client.post(url, headers={"Authorization": f"Bearer {token}"}, json=payload, timeout=30.0)
 
-async def get_root_and_parent(uri: str, token: str):
-    """Returns (root_uri, root_cid, parent_uri, parent_cid) for correct reply structure"""
+async def get_root_uri_and_cid(uri: str, token: str):
+    """Extracts root_uri and root_cid from the notification's record"""
     try:
         parts = uri.split("/")
         repo, rkey = parts[2], parts[4]
@@ -100,34 +100,22 @@ async def get_root_and_parent(uri: str, token: str):
             record = r.json().get("value", {})
             reply = record.get("reply")
             
-            if not reply or "root" not in reply or "parent" not in reply:
-                # This is a root post — reply to itself
-                cid = record.get("cid", "bafyreihjdbd4zq4f4a5v6w5z5g5q5j5j5j5j5j5j5j5j5j5j5j5j5j5j5j5j5j")
-                return uri, cid, uri, cid
+            if not reply or "root" not in reply:
+                # This is a root post
+                return uri, record.get("cid", "bafyreihjdbd4zq4f4a5v6w5z5g5q5j5j5j5j5j5j5j5j5j5j5j5j5j5j5j5j5j")
             
-            # Extract root and parent URIs
             root_uri = reply["root"]["uri"]
-            parent_uri = reply["parent"]["uri"]
-            
-            # Get root CID
             root_parts = root_uri.split("/")
             root_repo, root_rkey = root_parts[2], root_parts[4]
             root_url = f"https://bsky.social/xrpc/com.atproto.repo.getRecord?repo={root_repo}&collection=app.bsky.feed.post&rkey={root_rkey}"
             r_root = await client.get(root_url, headers={"Authorization": f"Bearer {token}"}, timeout=30.0)
             root_cid = r_root.json().get("cid", "bafyreihjdbd4zq4f4a5v6w5z5g5q5j5j5j5j5j5j5j5j5j5j5j5j5j5j5j5j5j")
             
-            # Get parent CID
-            parent_parts = parent_uri.split("/")
-            parent_repo, parent_rkey = parent_parts[2], parent_parts[4]
-            parent_url = f"https://bsky.social/xrpc/com.atproto.repo.getRecord?repo={parent_repo}&collection=app.bsky.feed.post&rkey={parent_rkey}"
-            r_parent = await client.get(parent_url, headers={"Authorization": f"Bearer {token}"}, timeout=30.0)
-            parent_cid = r_parent.json().get("cid", "bafyreihjdbd4zq4f4a5v6w5z5g5q5j5j5j5j5j5j5j5j5j5j5j5j5j5j5j5j5j")
-            
-            return root_uri, root_cid, parent_uri, parent_cid
+            return root_uri, root_cid
     except Exception as e:
-        print(f"[THREAD STRUCTURE ERROR] {e}")
+        print(f"[ROOT EXTRACTION ERROR] {e}")
         fallback_cid = "bafyreihjdbd4zq4f4a5v6w5z5g5q5j5j5j5j5j5j5j5j5j5j5j5j5j5j5j5j5j"
-        return uri, fallback_cid, uri, fallback_cid
+        return uri, fallback_cid
 
 async def get_parent_post_text(uri: str, token: str) -> str:
     try:
@@ -162,12 +150,12 @@ def ask_local(prompt: str) -> str:
     full_prompt = ""
     for msg in messages:
         if msg["role"] == "user":
-            full_prompt += "                                               <|im_start|>user\n" + msg['content'] + "         <|im_end|>\n"
+            full_prompt += "                                                 <|im_start|>user\n" + msg['content'] + "           <|im_end|>\n"
         elif msg["role"] == "assistant":
-            full_prompt += "                                               <|im_start|>assistant\n" + msg['content'] + "         <|im_end|>\n"
+            full_prompt += "                                                 <|im_start|>assistant\n" + msg['content'] + "           <|im_end|>\n"
         else:
-            full_prompt += "                                               <|im_start|>system\n" + msg['content'] + "         <|im_end|>\n"
-    full_prompt += "                                               <|im_start|>assistant\n"
+            full_prompt += "                                                 <|im_start|>system\n" + msg['content'] + "           <|im_end|>\n"
+    full_prompt += "                                                 <|im_start|>assistant\n"
 
     out = llm(
         full_prompt,
@@ -255,11 +243,15 @@ async def main():
 
         print(f"\n📬 Processing: {indexed_at} | {reason} | '{txt[:50]}...'")
 
-        # Get correct thread structure
-        root_uri, root_cid, parent_uri, parent_cid = await get_root_and_parent(uri, token)
+        # Get root_uri and root_cid from the notification's record
+        root_uri, root_cid = await get_root_uri_and_cid(uri, token)
         
+        # CRITICAL: parent_uri is ALWAYS the notification's URI (user's comment)
+        parent_uri = uri
+        parent_cid = await get_cid(parent_uri, token)
+
         # Log for debugging
-        print(f"🔗 Replying to: parent={parent_uri.split('/')[-1]}, root={root_uri.split('/')[-1]}")
+        print(f"🔗 Replying to user's comment: parent={parent_uri.split('/')[-1]}, root={root_uri.split('/')[-1]}")
 
         parent_text = await get_parent_post_text(uri, token)
         prompt = f"User says: '{txt}'. Respond helpfully."
