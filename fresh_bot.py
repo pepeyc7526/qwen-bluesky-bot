@@ -22,7 +22,6 @@ def load_last_processed():
             data = json.load(f)
             return data.get("indexedAt", "1970-01-01T00:00:00.000Z")
     else:
-        # Return epoch time if file doesn't exist (won't create it)
         return "1970-01-01T00:00:00.000Z"
 
 def save_last_processed(indexed_at):
@@ -104,6 +103,9 @@ async def get_parent_post_text(uri: str, token: str) -> str:
         return ""
 
 def ask_local(prompt: str) -> str:
+    # Replace bot's handle with "you" to avoid self-reference
+    prompt = prompt.replace(f"@{BOT_HANDLE}", "you")
+    
     messages = [
         {"role": "system", "content": "You are a helpful AI assistant. Answer briefly and clearly. Keep under 300 chars. No links or emojis."},
         {"role": "user", "content": prompt}
@@ -112,12 +114,12 @@ def ask_local(prompt: str) -> str:
     full_prompt = ""
     for msg in messages:
         if msg["role"] == "user":
-            full_prompt += "                                         <|im_start|>user\n" + msg['content'] + "   <|im_end|>\n"
+            full_prompt += "                                          <|im_start|>user\n" + msg['content'] + "    <|im_end|>\n"
         elif msg["role"] == "assistant":
-            full_prompt += "                                         <|im_start|>assistant\n" + msg['content'] + "   <|im_end|>\n"
+            full_prompt += "                                          <|im_start|>assistant\n" + msg['content'] + "    <|im_end|>\n"
         else:
-            full_prompt += "                                         <|im_start|>system\n" + msg['content'] + "   <|im_end|>\n"
-    full_prompt += "                                         <|im_start|>assistant\n"
+            full_prompt += "                                          <|im_start|>system\n" + msg['content'] + "    <|im_end|>\n"
+    full_prompt += "                                          <|im_start|>assistant\n"
 
     out = llm(
         full_prompt,
@@ -132,7 +134,11 @@ def ask_local(prompt: str) -> str:
     if any(w in ans.lower() for w in ["don't know", "unclear", "provide more", "doesn't seem"]):
         ans = "🤔 Not sure what you mean. Try rephrasing!"
 
-    return ans[:MAX_LEN] if len(ans) > MAX_LEN else ans
+    # Smart truncation at word boundary
+    if len(ans) <= MAX_LEN:
+        return ans
+    truncated = ans[:MAX_LEN].rsplit(' ', 1)[0]
+    return truncated + "…" if truncated else ans[:MAX_LEN-1] + "…"
 
 async def mark_notifications_as_read(token: str, seen_at: str):
     url = "https://bsky.social/xrpc/app.bsky.notification.updateSeen"
