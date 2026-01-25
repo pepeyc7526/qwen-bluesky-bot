@@ -57,11 +57,11 @@ The bot runs on a **scheduled cron job**. You can change the frequency by editin
 
 ---
 
-### Current Schedule: Every 20 minutes
+### Current Schedule: 1 time per hour
 ```yaml
 on:
   schedule:
-    - cron: '*/20 * * * *'
+    - cron: '0 * * * *'
 ```
 ---
 
