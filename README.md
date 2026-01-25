@@ -51,6 +51,18 @@ The bot only responds to **its owner** (verified by DID). You can:
 
 ---
 
+## ⏳ How to Adjust Run Frequency
+
+The bot runs on a **scheduled cron job**. You can change the frequency by editing `.github/workflows/bluesky-bot.yml`.
+
+### Current Schedule: Every 20 minutes
+```yaml
+on:
+  schedule:
+    - cron: '*/20 * * * *'
+
+---
+
 ## 📦 Tech Stack
 
 - **Model**: [Qwen2-7B-Instruct-GGUF (Q4_K_M)](https://huggingface.co/Qwen/Qwen2-7B-Instruct-GGUF)
