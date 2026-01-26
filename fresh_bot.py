@@ -10,16 +10,8 @@ MAX_LEN = 300
 SEARCH_USAGE_FILE = "search_usage.json"
 LAST_PROCESSED_FILE = "last_processed.json"
 
-# === DEBUG: Check secrets early ===
 if not all([BOT_HANDLE, BOT_PASSWORD, BOT_DID, OWNER_DID]):
-    print("[DEBUG] Missing env vars:")
-    print(f"  BOT_HANDLE: {'✓' if BOT_HANDLE else 'MISSING'}")
-    print(f"  BOT_PASSWORD: {'✓' if BOT_PASSWORD else 'MISSING'}")
-    print(f"  BOT_DID: {'✓' if BOT_DID else 'MISSING'}")
-    print(f"  OWNER_DID: {'✓' if OWNER_DID else 'MISSING'}")
-    raise RuntimeError("Missing required env vars")
-
-print(f"[DEBUG] Using BOT_HANDLE: {BOT_HANDLE}")
+    raise RuntimeError("Missing required env vars: BOT_HANDLE, BOT_PASSWORD, BOT_DID, OWNER_DID")
 
 MODEL_PATH = "models/qwen2-7b-instruct-q4_k_m.gguf"
 llm = Llama(model_path=MODEL_PATH, n_ctx=2048, n_threads=2, verbose=False)
@@ -31,7 +23,7 @@ def load_last_processed():
                 data = json.load(f)
                 return data.get("indexedAt", "1970-01-01T00:00:00.000Z")
         except (json.JSONDecodeError, ValueError) as e:
-            print(f"[WARNING] Invalid JSON in {LAST_PROCESSED_FILE}: {e}. Using default.")
+            print(f"[WARNING] Invalid JSON in {LAST_PROCESSED_FILE}: {e}. Using default timestamp.")
             return "1970-01-01T00:00:00.000Z"
     else:
         return "1970-01-01T00:00:00.000Z"
@@ -63,26 +55,8 @@ def should_reset_counter():
 async def get_fresh_token(client) -> str:
     url = "https://bsky.social/xrpc/com.atproto.server.createSession"
     payload = {"identifier": BOT_HANDLE, "password": BOT_PASSWORD}
-    
-    print(f"[DEBUG] Sending login request to: {url}")
-    print(f"[DEBUG] Payload handle: {BOT_HANDLE}")
-    # Не логируем пароль — но проверяем его длину
-    print(f"[DEBUG] Password length: {len(BOT_PASSWORD)} chars")
-    
     r = await client.post(url, json=payload, timeout=30.0)
-    
-    print(f"[DEBUG] Login response status: {r.status_code}")
-    response_data = r.json()
-    print(f"[DEBUG] Full response: {response_data}")
-    
-    if "error" in response_data:
-        error_msg = response_data.get("message", "Unknown error")
-        raise RuntimeError(f"Bluesky login failed: {error_msg}")
-    
-    if "accessJwt" not in response_data:
-        raise KeyError("Response missing 'accessJwt' — check credentials")
-    
-    return response_data["accessJwt"]
+    return r.json()["accessJwt"]
 
 async def get_cid(uri: str, token: str, client) -> str:
     try:
@@ -169,12 +143,12 @@ def ask_local(prompt: str) -> str:
     full_prompt = ""
     for msg in messages:
         if msg["role"] == "user":
-            full_prompt += "<|im_start|>user\n" + msg['content'] + "<|im_end|>\n"
+            full_prompt += "                                                  <|im_start|>user\n" + msg['content'] + "            <|im_end|>\n"
         elif msg["role"] == "assistant":
-            full_prompt += "<|im_start|>assistant\n" + msg['content'] + "<|im_end|>\n"
+            full_prompt += "                                                  <|im_start|>assistant\n" + msg['content'] + "            <|im_end|>\n"
         else:
-            full_prompt += "<|im_start|>system\n" + msg['content'] + "<|im_end|>\n"
-    full_prompt += "<|im_start|>assistant\n"
+            full_prompt += "                                                  <|im_start|>system\n" + msg['content'] + "            <|im_end|>\n"
+    full_prompt += "                                                  <|im_start|>assistant\n"
 
     out = llm(
         full_prompt,
@@ -201,9 +175,8 @@ async def mark_notifications_as_read(token: str, seen_at: str, client):
 
 async def main():
     async with httpx.AsyncClient() as client:
-        print("✅ Starting bot...")
         token = await get_fresh_token(client)
-        print("✅ Login successful!")
+        print("✅ Starting bot...")
 
         if should_reset_counter():
             save_search_usage(0)
@@ -215,6 +188,7 @@ async def main():
         url = "https://bsky.social/xrpc/app.bsky.notification.listNotifications"
         r = await client.get(url, headers={"Authorization": f"Bearer {token}"}, timeout=30.0)
         notifications = r.json().get("notifications", [])
+
         print(f"📥 Found {len(notifications)} notifications from API")
 
         new_notifs = []
@@ -268,7 +242,9 @@ async def main():
             print(f"🔗 Replying to user's comment: parent={parent_uri.split('/')[-1]}, root={root_uri.split('/')[-1]}")
 
             parent_text = await get_parent_post_text(uri, token, client)
-            prompt = f"User replied to: '{parent_text}'. Comment: '{txt}'. Respond helpfully." if parent_text else f"User says: '{txt}'. Respond helpfully."
+            prompt = f"User says: '{txt}'. Respond helpfully."
+            if parent_text:
+                prompt = f"User replied to: '{parent_text}'. Comment: '{txt}'. Respond helpfully."
 
             reply = ask_local(prompt)
             await post_reply(reply, root_uri, root_cid, parent_uri, parent_cid, token, client)
