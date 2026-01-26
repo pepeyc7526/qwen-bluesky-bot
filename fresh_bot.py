@@ -87,6 +87,7 @@ async def post_reply(text: str, root_uri: str, root_cid: str, parent_uri: str, p
     await client.post(url, headers={"Authorization": f"Bearer {token}"}, json=payload, timeout=30.0)
 
 async def get_root_uri_and_cid(uri: str, token: str, client):
+    """Extracts root_uri and root_cid from the notification's record"""
     try:
         parts = uri.split("/")
         repo, rkey = parts[2], parts[4]
@@ -95,17 +96,34 @@ async def get_root_uri_and_cid(uri: str, token: str, client):
         record = r.json().get("value", {})
         reply = record.get("reply")
         
-        if not reply or "root" not in reply:
+        print(f"[DEBUG] Record for {uri}:")
+        print(f"  Has reply: {reply is not None}")
+        if reply:
+            print(f"  Root URI: {reply.get('root', {}).get('uri', 'MISSING')}")
+            print(f"  Parent URI: {reply.get('parent', {}).get('uri', 'MISSING')}")
+        
+        # Если это упоминание в корневом посте (нет reply)
+        if not reply:
+            print("[DEBUG] This is a root post (no reply chain)")
             return uri, record.get("cid", "bafyreihjdbd4zq4f4a5v6w5z5g5q5j5j5j5j5j5j5j5j5j5j5j5j5j5j5j5j5j")
         
-        root_uri = reply["root"]["uri"]
+        # Если есть reply — извлекаем root
+        root_info = reply.get("root", {})
+        root_uri = root_info.get("uri")
+        if not root_uri:
+            print("[DEBUG] No root URI in reply, using notification URI as root")
+            return uri, record.get("cid", "bafyreihjdbd4zq4f4a5v6w5z5g5q5j5j5j5j5j5j5j5j5j5j5j5j5j5j5j5j5j")
+        
+        # Получаем CID для root_uri
         root_parts = root_uri.split("/")
         root_repo, root_rkey = root_parts[2], root_parts[4]
         root_url = f"https://bsky.social/xrpc/com.atproto.repo.getRecord?repo={root_repo}&collection=app.bsky.feed.post&rkey={root_rkey}"
         r_root = await client.get(root_url, headers={"Authorization": f"Bearer {token}"}, timeout=30.0)
         root_cid = r_root.json().get("cid", "bafyreihjdbd4zq4f4a5v6w5z5g5q5j5j5j5j5j5j5j5j5j5j5j5j5j5j5j5j5j")
         
+        print(f"[DEBUG] Using root: {root_uri} (CID: {root_cid[:10]}...)")
         return root_uri, root_cid
+        
     except Exception as e:
         print(f"[ROOT EXTRACTION ERROR] {e}")
         fallback_cid = "bafyreihjdbd4zq4f4a5v6w5z5g5q5j5j5j5j5j5j5j5j5j5j5j5j5j5j5j5j5j"
@@ -143,12 +161,12 @@ def ask_local(prompt: str) -> str:
     full_prompt = ""
     for msg in messages:
         if msg["role"] == "user":
-            full_prompt += "                                                  <|im_start|>user\n" + msg['content'] + "            <|im_end|>\n"
+            full_prompt += "<|im_start|>user\n" + msg['content'] + "<|im_end|>\n"
         elif msg["role"] == "assistant":
-            full_prompt += "                                                  <|im_start|>assistant\n" + msg['content'] + "            <|im_end|>\n"
+            full_prompt += "<|im_start|>assistant\n" + msg['content'] + "<|im_end|>\n"
         else:
-            full_prompt += "                                                  <|im_start|>system\n" + msg['content'] + "            <|im_end|>\n"
-    full_prompt += "                                                  <|im_start|>assistant\n"
+            full_prompt += "<|im_start|>system\n" + msg['content'] + "<|im_end|>\n"
+    full_prompt += "<|im_start|>assistant\n"
 
     out = llm(
         full_prompt,
