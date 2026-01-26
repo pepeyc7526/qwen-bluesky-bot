@@ -23,16 +23,13 @@ def load_last_processed():
                 data = json.load(f)
                 return data.get("indexedAt", "1970-01-01T00:00:00.000Z")
         except (json.JSONDecodeError, ValueError) as e:
-            print(f"[DEBUG] Invalid JSON in {LAST_PROCESSED_FILE}: {e}. Using default.")
             return "1970-01-01T00:00:00.000Z"
     else:
-        print(f"[DEBUG] {LAST_PROCESSED_FILE} not found. Using default timestamp.")
         return "1970-01-01T00:00:00.000Z"
 
 def save_last_processed(indexed_at):
     with open(LAST_PROCESSED_FILE, "w") as f:
         json.dump({"indexedAt": indexed_at}, f)
-    print(f"[DEBUG] Saved last_processed: {indexed_at}")
 
 def load_search_usage():
     if os.path.exists(SEARCH_USAGE_FILE):
@@ -66,8 +63,7 @@ async def get_cid(uri: str, token: str, client) -> str:
         url = f"https://bsky.social/xrpc/com.atproto.repo.getRecord?repo={repo}&collection={collection}&rkey={rkey}"
         r = await client.get(url, headers={"Authorization": f"Bearer {token}"}, timeout=30.0)
         return r.json().get("cid", "bafyreihjdbd4zq4f4a5v6w5z5g5q5j5j5j5j5j5j5j5j5j5j5j5j5j5j5j5j5j")
-    except Exception as e:
-        print(f"[CID ERROR] {e}")
+    except:
         return "bafyreihjdbd4zq4f4a5v6w5z5g5q5j5j5j5j5j5j5j5j5j5j5j5j5j5j5j5j5j"
 
 async def post_reply(text: str, root_uri: str, root_cid: str, parent_uri: str, parent_cid: str, token: str, client):
@@ -107,8 +103,7 @@ async def get_root_uri_and_cid(uri: str, token: str, client):
         root_cid = r_root.json().get("cid", "bafyreihjdbd4zq4f4a5v6w5z5g5q5j5j5j5j5j5j5j5j5j5j5j5j5j5j5j5j5j")
         
         return root_uri, root_cid
-    except Exception as e:
-        print(f"[ROOT EXTRACTION ERROR] {e}")
+    except:
         fallback_cid = "bafyreihjdbd4zq4f4a5v6w5z5g5q5j5j5j5j5j5j5j5j5j5j5j5j5j5j5j5j5j"
         return uri, fallback_cid
 
@@ -129,8 +124,7 @@ async def get_parent_post_text(uri: str, token: str, client) -> str:
         r2 = await client.get(parent_url, headers={"Authorization": f"Bearer {token}"}, timeout=30.0)
         parent_record = r2.json().get("value", {})
         return parent_record.get("text", "")
-    except Exception as e:
-        print(f"[PARENT TEXT ERROR] {e}")
+    except:
         return ""
 
 def ask_local(prompt: str) -> str:
@@ -177,19 +171,15 @@ async def mark_notifications_as_read(token: str, seen_at: str, client):
 async def main():
     async with httpx.AsyncClient() as client:
         token = await get_fresh_token(client)
-        print("✅ Starting bot...")
 
         if should_reset_counter():
             save_search_usage(0)
-            print("📅 Search counter reset")
 
         last_indexed_at = load_last_processed()
-        print(f"🕒 Last processed notification: {last_indexed_at}")
 
         url = "https://bsky.social/xrpc/app.bsky.notification.listNotifications"
         r = await client.get(url, headers={"Authorization": f"Bearer {token}"}, timeout=30.0)
         notifications = r.json().get("notifications", [])
-        print(f"📥 Found {len(notifications)} notifications from API")
 
         new_notifs = []
         for notif in notifications:
@@ -213,15 +203,10 @@ async def main():
 
             new_notifs.append((notif, indexed_at))
 
-        print(f"🔍 Found {len(new_notifs)} new notifications to process")
-
         if not new_notifs:
             if notifications:
                 latest = max(notifications, key=lambda x: x.get("indexedAt", ""))
                 await mark_notifications_as_read(token, latest.get("indexedAt", ""), client)
-                print(f"✅ UI counter reset (marked up to {latest.get('indexedAt')})")
-            else:
-                print("ℹ️ No notifications to process")
             return
 
         new_notifs.sort(key=lambda x: x[1])
@@ -231,7 +216,6 @@ async def main():
         for notif, indexed_at in new_notifs:
             txt = notif["record"]["text"]
             uri = notif["uri"]
-            print(f"\n📬 Processing: {indexed_at} | '{txt[:50]}...'")
 
             root_uri, root_cid = await get_root_uri_and_cid(uri, token, client)
             parent_uri = uri
@@ -241,7 +225,6 @@ async def main():
             prompt = f"User replied to: '{parent_text}'. Comment: '{txt}'. Respond helpfully." if parent_text else f"User says: '{txt}'. Respond helpfully."
             reply = ask_local(prompt)
             await post_reply(reply, root_uri, root_cid, parent_uri, parent_cid, token, client)
-            print(f"✅ Replied: '{reply}'")
 
             processed_count += 1
             if indexed_at > latest_processed:
@@ -251,14 +234,9 @@ async def main():
 
         if latest_processed != last_indexed_at:
             save_last_processed(latest_processed)
-            print(f"💾 Updated last_processed.json to: {latest_processed}")
-        else:
-            print("⚠️ No update to last_processed.json (no newer notifications)")
 
         final_seen_at = latest_processed if new_notifs else last_indexed_at
         await mark_notifications_as_read(token, final_seen_at, client)
-        print(f"✅ UI counter reset (marked up to {final_seen_at})")
-        print(f"🎉 Done: {processed_count} replies sent")
 
 if __name__ == "__main__":
     asyncio.run(main())
