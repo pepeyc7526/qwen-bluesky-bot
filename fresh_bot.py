@@ -75,15 +75,11 @@ def is_duplicate_reply(new_reply, recent_replies):
 def ask_local(prompt: str) -> str:
     prompt = prompt.replace(f"@{BOT_HANDLE}", "you")
     
-    # === WEB SEARCH: flexible quote detection ===
+    # === WEB SEARCH DETECTION ===
     web_query = None
     prompt_clean = prompt.strip()
-    
-    # Case 1: Starts with 'web'
     if prompt_clean.lower().startswith("'web'"):
         web_query = prompt_clean[6:].strip()
-    
-    # Case 2: 'web' somewhere in the middle
     elif " 'web' " in prompt_clean.lower():
         parts = prompt_clean.split("'web'", 1)
         if len(parts) == 2:
@@ -91,28 +87,60 @@ def ask_local(prompt: str) -> str:
     
     if web_query:
         try:
-            from urllib.parse import quote_plus
-            query = quote_plus(web_query)
-            url = f"https://api.duckduckgo.com/?q={query}&format=json&no_html=1&skip_disambig=1"
+            from googlesearch import search
+            from urllib.parse import urlparse
             
-            response = httpx.get(url, timeout=10.0)
-            data = response.json()
+            # Get top 3 results
+            urls = []
+            for url in search(web_query, num_results=3, lang="en", sleep_interval=1):
+                urls.append(url)
+                if len(urls) >= 3:
+                    break
             
-            answer = data.get("AbstractText", "").strip()
-            if not answer:
-                related = data.get("RelatedTopics", [])
-                if related and isinstance(related[0], dict):
-                    answer = related[0].get("Text", "").strip()
+            if not urls:
+                return "🌐 No results found."
             
-            if answer:
-                if len(answer) > MAX_LEN:
-                    answer = answer[:MAX_LEN].rsplit(' ', 1)[0] + "…"
-                return answer
+            # Build context from domains
+            domains = [urlparse(url).netloc for url in urls]
+            context = "\n".join([f"- Source: {domain}" for domain in domains[:3]])
             
-            return "🌐 No clear answer found."
+            # Generate response
+            search_prompt = (
+                f"User asked: '{web_query}'.\n"
+                f"Relevant sources:\n{context}\n"
+                "Provide a concise factual answer. If unsure, say 'Not enough info'."
+            )
             
+            messages = [
+                {"role": "system", "content": "You are a helpful AI assistant. Answer briefly and clearly. Keep under 300 chars. No links or emojis."},
+                {"role": "user", "content": search_prompt}
+            ]
+            
+            full_prompt = ""
+            for msg in messages:
+                if msg["role"] == "user":
+                    full_prompt += "  user\n" + msg['content'] + "  \n"
+                else:
+                    full_prompt += "  system\n" + msg['content'] + "  \n"
+            full_prompt += "  assistant\n"
+
+            out = llm(
+                full_prompt,
+                max_tokens=120,
+                stop=["  ", "  "],
+                echo=False,
+                temperature=0.3
+            )
+            ans = out["choices"][0]["text"].strip()
+            ans = " ".join(ans.split())
+            
+            if len(ans) <= MAX_LEN:
+                return ans
+            truncated = ans[:MAX_LEN].rsplit(' ', 1)[0]
+            return truncated + "…" if truncated else ans[:MAX_LEN-1] + "…"
+
         except Exception as e:
-            print(f"[DUCKDUCKGO ERROR] {e}")
+            print(f"[GOOGLE SEARCH ERROR] {e}")
             return "⚠️ Search failed. Try again later."
 
     # === REGULAR MODE ===
