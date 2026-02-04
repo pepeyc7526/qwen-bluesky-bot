@@ -81,10 +81,9 @@ jobs:
         run: |
           git config user.email "actions@github.com"
           git config user.name "GitHub Actions"
-          git add search_usage.json last_processed.json 2>/dev/null || true
+          git add search_usage.json last_processed.json recent_replies.json 2>/dev/null || true
           if ! git diff --cached --quiet; then
             git commit -m "Update bot state"
-            # Automatically resolve conflicts by taking our version
             git pull origin main -X ours 2>/dev/null || true
             git push
             echo "✅ State files committed successfully"
