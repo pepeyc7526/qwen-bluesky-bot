@@ -70,7 +70,6 @@ jobs:
           git add search_usage.json last_processed.json 2>/dev/null || true
           if ! git diff --cached --quiet; then
             git commit -m "Update bot state"
-            # Разрешаем конфликты в пользу наших изменений
             git pull origin main -X ours 2>/dev/null || true
             git push
             echo "✅ State files committed successfully"
