@@ -226,12 +226,34 @@ async def main():
                 continue
             if author_did != OWNER_DID:
                 continue
-            if reason not in ("mention", "reply"):
-                continue
             if record.get("$type") != "app.bsky.feed.post":
                 continue
 
-            new_notifs.append((notif, indexed_at))
+            # === ФИЛЬТРАЦИЯ: только упоминания или ответы боту ===
+            should_process = False
+
+            if reason == "mention":
+                should_process = True
+
+            elif reason == "reply":
+                reply = record.get("reply", {})
+                parent_uri = reply.get("parent", {}).get("uri", "")
+                if parent_uri:
+                    try:
+                        parent_did = parent_uri.split("/")[2]  # at://did:plc:xxx/... → did:plc:xxx
+                        if parent_did == BOT_DID:
+                            should_process = True
+                        else:
+                            print(f"[SKIP] Reply to non-bot post (DID: {parent_did})")
+                    except Exception as e:
+                        print(f"[ERROR] Failed to parse parent DID: {e}")
+                else:
+                    print("[SKIP] Reply without parent URI")
+
+            if should_process:
+                new_notifs.append((notif, indexed_at))
+            else:
+                print(f"[SKIP] Ignoring: {reason} | '{txt[:30]}...'")
 
         print(f"🔍 Found {len(new_notifs)} new notifications to process")
 
