@@ -46,5 +46,6 @@ jobs:
           BOT_DID: ${{ secrets.BOT_DID }}
           OWNER_DID: ${{ secrets.OWNER_DID }}
           PAT: ${{ secrets.PAT }}
-          GITHUB_TOKEN: ${{ secrets.PAT }}  # Используем твой PAT для работы с секретами
+          GITHUB_TOKEN: ${{ secrets.PAT }}
+          BOT_STATE: ${{ secrets.BOT_STATE }}
         run: python fresh_bot.py
