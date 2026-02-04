@@ -73,6 +73,20 @@ def is_duplicate_reply(new_reply, recent_replies):
             return True
     return False
 
+# === SEARCH USAGE FUNCTIONS ===
+def load_search_usage():
+    state = load_state()
+    return state.get("search_usage", {"count": 0, "month": datetime.datetime.now().month})
+
+def save_search_usage(count: int):
+    state = load_state()
+    state["search_usage"] = {"count": count, "month": datetime.datetime.now().month}
+    # Note: Actual saving happens in main() via save_state_encrypted
+
+def should_reset_counter():
+    usage = load_search_usage()
+    return usage["month"] != datetime.datetime.now().month
+
 # === BLUESKY FUNCTIONS ===
 async def get_fresh_token(client) -> str:
     url = "https://bsky.social/xrpc/com.atproto.server.createSession"
@@ -157,6 +171,103 @@ async def get_parent_post_text(uri: str, token: str, client) -> str:
 def ask_local(prompt: str) -> str:
     prompt = prompt.replace(f"@{BOT_HANDLE}", "you")
     
+    # === WEB SEARCH DETECTION (quoted only) ===
+    web_query = None
+    prompt_lower = prompt.lower()
+    
+    # Look for 'web' inside single quotes (case-insensitive)
+    if "'web'" in prompt_lower:
+        # Find the exact quoted part
+        start = prompt_lower.find("'web'")
+        if start != -1:
+            # Extract everything after the closing quote
+            after_quote = prompt[start + 6:].strip()  # 6 = len("'web'")
+            if after_quote:
+                web_query = after_quote
+    
+    if web_query:
+        # Perform web search
+        try:
+            from urllib.parse import quote_plus
+            api_key = os.getenv("GOOGLE_API_KEY")
+            cse_id = os.getenv("GOOGLE_CSE_ID")
+            
+            if not api_key or not cse_id:
+                return "🔍 Web search disabled (missing API keys)."
+            
+            # Get current search usage
+            state = load_state()
+            search_usage = state.get("search_usage", {"count": 0, "month": datetime.datetime.now().month})
+            
+            if should_reset_counter():
+                search_usage = {"count": 0, "month": datetime.datetime.now().month}
+            
+            if search_usage["count"] >= 100:
+                return "⚠️ Monthly search limit reached."
+            
+            # Perform search
+            query = quote_plus(web_query)
+            url = f"https://www.googleapis.com/customsearch/v1?key={api_key}&cx={cse_id}&q={query}"
+            response = httpx.get(url, timeout=10.0)
+            results = response.json()
+            
+            if "items" not in results:
+                return "🌐 No relevant results found."
+            
+            # Get top 3 snippets
+            snippets = []
+            for item in results["items"][:3]:
+                snippet = item.get("snippet", "")
+                if snippet:
+                    snippets.append(snippet)
+            
+            if not snippets:
+                return "🌐 No readable content found."
+            
+            # Build context for LLM
+            context = "\n".join([f"- {s}" for s in snippets])
+            search_prompt = (
+                f"User asked: '{web_query}'.\n"
+                f"Web results:\n{context}\n"
+                "Provide a concise answer using ONLY the information above. If unsure, say 'Not enough info'."
+            )
+            
+            # Generate response
+            messages = [
+                {"role": "system", "content": "You are a helpful AI assistant. Answer briefly and clearly. Keep under 300 chars. No links or emojis."},
+                {"role": "user", "content": search_prompt}
+            ]
+            
+            full_prompt = ""
+            for msg in messages:
+                if msg["role"] == "user":
+                    full_prompt += "  user\n" + msg['content'] + "  \n"
+                elif msg["role"] == "assistant":
+                    full_prompt += "  assistant\n" + msg['content'] + "  \n"
+                else:
+                    full_prompt += "  system\n" + msg['content'] + "  \n"
+            full_prompt += "  assistant\n"
+
+            out = llm(
+                full_prompt,
+                max_tokens=120,
+                stop=["  ", "  "],
+                echo=False,
+                temperature=0.3
+            )
+            ans = out["choices"][0]["text"].strip()
+            ans = " ".join(ans.split())
+            
+            if len(ans) <= MAX_LEN:
+                return ans
+            truncated = ans[:MAX_LEN].rsplit(' ', 1)[0]
+            return truncated + "…" if truncated else ans[:MAX_LEN-1] + "…"
+            
+        except Exception as e:
+            print(f"[WEB SEARCH ERROR] {e}")
+            return "⚠️ Search failed. Try again later."
+    
+    # === REGULAR MODE ===
     messages = [
         {"role": "system", "content": "You are a helpful AI assistant. Answer briefly and clearly. Keep under 300 chars. No links or emojis. NEVER repeat the same information twice."},
         {"role": "user", "content": prompt}
@@ -303,6 +414,7 @@ async def main():
             print(f"⏳ Waiting {delay} seconds...")
             await asyncio.sleep(delay)
 
+        # Update state
         state["last_processed"] = latest_processed
         state["recent_replies"] = recent_replies
         state["search_usage"] = search_usage
