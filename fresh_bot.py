@@ -73,7 +73,7 @@ def should_reset_counter():
     return usage["month"] != current_month
 
 async def get_fresh_token(client) -> str:
-    url = "https://bsky.social/xrpc/com.atproto.server.createSession      "
+    url = "https://bsky.social/xrpc/com.atproto.server.createSession  "
     payload = {"identifier": BOT_HANDLE, "password": BOT_PASSWORD}
     r = await client.post(url, json=payload, timeout=30.0)
     return r.json()["accessJwt"]
@@ -82,7 +82,7 @@ async def get_cid(uri: str, token: str, client) -> str:
     try:
         parts = uri.split("/")
         repo, collection, rkey = parts[2], parts[3], parts[4]
-        url = f"https://bsky.social/xrpc/com.atproto.repo.getRecord?repo=      {repo}&collection={collection}&rkey={rkey}"
+        url = f"https://bsky.social/xrpc/com.atproto.repo.getRecord?repo=  {repo}&collection={collection}&rkey={rkey}"
         r = await client.get(url, headers={"Authorization": f"Bearer {token}"}, timeout=30.0)
         return r.json().get("cid", "bafyreihjdbd4zq4f4a5v6w5z5g5q5j5j5j5j5j5j5j5j5j5j5j5j5j5j5j5j5j")
     except Exception as e:
@@ -90,7 +90,7 @@ async def get_cid(uri: str, token: str, client) -> str:
         return "bafyreihjdbd4zq4f4a5v6w5z5g5q5j5j5j5j5j5j5j5j5j5j5j5j5j5j5j5j5j"
 
 async def post_reply(text: str, root_uri: str, root_cid: str, parent_uri: str, parent_cid: str, token: str, client):
-    url = "https://bsky.social/xrpc/com.atproto.repo.createRecord      "
+    url = "https://bsky.social/xrpc/com.atproto.repo.createRecord  "
     payload = {
         "repo": BOT_DID,
         "collection": "app.bsky.feed.post",
@@ -110,7 +110,7 @@ async def get_root_uri_and_cid(uri: str, token: str, client):
     try:
         parts = uri.split("/")
         repo, rkey = parts[2], parts[4]
-        url = f"https://bsky.social/xrpc/com.atproto.repo.getRecord?repo=      {repo}&collection=app.bsky.feed.post&rkey={rkey}"
+        url = f"https://bsky.social/xrpc/com.atproto.repo.getRecord?repo=  {repo}&collection=app.bsky.feed.post&rkey={rkey}"
         r = await client.get(url, headers={"Authorization": f"Bearer {token}"}, timeout=30.0)
         record = r.json().get("value", {})
         reply = record.get("reply")
@@ -121,7 +121,7 @@ async def get_root_uri_and_cid(uri: str, token: str, client):
         root_uri = reply["root"]["uri"]
         root_parts = root_uri.split("/")
         root_repo, root_rkey = root_parts[2], root_parts[4]
-        root_url = f"https://bsky.social/xrpc/com.atproto.repo.getRecord?repo=      {root_repo}&collection=app.bsky.feed.post&rkey={root_rkey}"
+        root_url = f"https://bsky.social/xrpc/com.atproto.repo.getRecord?repo=  {root_repo}&collection=app.bsky.feed.post&rkey={root_rkey}"
         r_root = await client.get(root_url, headers={"Authorization": f"Bearer {token}"}, timeout=30.0)
         root_cid = r_root.json().get("cid", "bafyreihjdbd4zq4f4a5v6w5z5g5q5j5j5j5j5j5j5j5j5j5j5j5j5j5j5j5j5j")
         
@@ -135,7 +135,7 @@ async def get_parent_post_text(uri: str, token: str, client) -> str:
     try:
         parts = uri.split("/")
         repo, rkey = parts[2], parts[4]
-        url = f"https://bsky.social/xrpc/com.atproto.repo.getRecord?repo=      {repo}&collection=app.bsky.feed.post&rkey={rkey}"
+        url = f"https://bsky.social/xrpc/com.atproto.repo.getRecord?repo=  {repo}&collection=app.bsky.feed.post&rkey={rkey}"
         r = await client.get(url, headers={"Authorization": f"Bearer {token}"}, timeout=30.0)
         record = r.json().get("value", {})
         reply = record.get("reply")
@@ -144,7 +144,7 @@ async def get_parent_post_text(uri: str, token: str, client) -> str:
         parent_uri = reply["parent"]["uri"]
         parent_parts = parent_uri.split("/")
         parent_repo, parent_rkey = parent_parts[2], parent_parts[4]
-        parent_url = f"https://bsky.social/xrpc/com.atproto.repo.getRecord?repo=      {parent_repo}&collection=app.bsky.feed.post&rkey={parent_rkey}"
+        parent_url = f"https://bsky.social/xrpc/com.atproto.repo.getRecord?repo=  {parent_repo}&collection=app.bsky.feed.post&rkey={parent_rkey}"
         r2 = await client.get(parent_url, headers={"Authorization": f"Bearer {token}"}, timeout=30.0)
         parent_record = r2.json().get("value", {})
         return parent_record.get("text", "")
@@ -189,7 +189,7 @@ def ask_local(prompt: str) -> str:
     return truncated + "…" if truncated else ans[:MAX_LEN-1] + "…"
 
 async def mark_notifications_as_read(token: str, seen_at: str, client):
-    url = "https://bsky.social/xrpc/app.bsky.notification.updateSeen      "
+    url = "https://bsky.social/xrpc/app.bsky.notification.updateSeen  "
     payload = {"seenAt": seen_at}
     await client.post(url, headers={"Authorization": f"Bearer {token}"}, json=payload, timeout=30.0)
 
@@ -205,7 +205,7 @@ async def main():
         last_indexed_at = load_last_processed()
         print(f"🕒 Last processed notification: {last_indexed_at}")
 
-        url = "https://bsky.social/xrpc/app.bsky.notification.listNotifications      "
+        url = "https://bsky.social/xrpc/app.bsky.notification.listNotifications  "
         r = await client.get(url, headers={"Authorization": f"Bearer {token}"}, timeout=30.0)
         notifications = r.json().get("notifications", [])
 
@@ -231,25 +231,20 @@ async def main():
             if record.get("$type") != "app.bsky.feed.post":
                 continue
 
-            # === ФИЛЬТРАЦИЯ СОГЛАСНО ДОКУМЕНТАЦИИ BLUESKY ===
-            # Согласно спецификации: 
-            # - Упоминание (mention) всегда адресовано боту — обрабатываем
-            # - Ответ (reply) проверяем: является ли бот автором родительского поста?
+            # === ФИЛЬТРАЦИЯ: только упоминания или ответы боту ===
             should_process = True
 
             if reason == "reply":
                 reply = record.get("reply", {})
                 parent_uri = reply.get("parent", {}).get("uri", "")
                 if parent_uri:
-                    # Извлекаем автора родительского поста через структуру URI
                     try:
-                        parent_parts = parent_uri.split("/")
-                        parent_repo = parent_parts[2]  # DID автора родительского поста
-                        if parent_repo != BOT_DID:
+                        parent_did = parent_uri.split("/")[2]  # at://did:plc:xxx/... → did:plc:xxx
+                        if parent_did != BOT_DID:
                             should_process = False
-                            print(f"[SKIP] Reply to non-bot post (author DID: {parent_repo})")
+                            print(f"[SKIP] Reply to non-bot post (DID: {parent_did})")
                     except Exception as e:
-                        print(f"[ERROR] Failed to parse parent author: {e}")
+                        print(f"[ERROR] Failed to parse parent DID: {e}")
                 else:
                     print("[SKIP] Reply without parent URI")
                     should_process = False
