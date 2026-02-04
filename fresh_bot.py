@@ -71,8 +71,64 @@ def is_duplicate_reply(new_reply, recent_replies):
             return True
     return False
 
+# === LIVE DATA APIS ===
+async def get_bitcoin_price():
+    try:
+        async with httpx.AsyncClient() as client:
+            r = await client.get("https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd", timeout=5.0)
+            price = r.json()["bitcoin"]["usd"]
+            return f"Current Bitcoin price: ${price:,}"
+    except:
+        return "⚠️ Bitcoin price unavailable."
+
+async def get_weather(city):
+    coords = {
+        "london": (51.5074, -0.1278),
+        "tokyo": (35.6895, 139.6917),
+        "new york": (40.7128, -74.0060),
+        "paris": (48.8566, 2.3522),
+        "berlin": (52.5200, 13.4050),
+        "moscow": (55.7558, 37.6173)
+    }
+    city_lower = city.lower()
+    if city_lower not in coords:
+        return "⚠️ Weather available for: London, Tokyo, New York, Paris, Berlin, Moscow."
+    
+    lat, lon = coords[city_lower]
+    url = f"https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lon}&current=temperature_2m"
+    try:
+        async with httpx.AsyncClient() as client:
+            r = await client.get(url, timeout=5.0)
+            temp = r.json()["current"]["temperature_2m"]
+            return f"Current temperature in {city.title()}: {temp}°C"
+    except:
+        return "⚠️ Weather service unavailable."
+
+async def get_time(location):
+    tz_map = {
+        "london": "Europe/London",
+        "tokyo": "Asia/Tokyo",
+        "new york": "America/New_York",
+        "paris": "Europe/Paris",
+        "berlin": "Europe/Berlin",
+        "moscow": "Europe/Moscow"
+    }
+    loc_lower = location.lower()
+    if loc_lower not in tz_map:
+        return "⚠️ Time available for: London, Tokyo, New York, Paris, Berlin, Moscow."
+    
+    tz = tz_map[loc_lower]
+    url = f"http://worldtimeapi.org/api/timezone/{tz}"
+    try:
+        async with httpx.AsyncClient() as client:
+            r = await client.get(url, timeout=5.0)
+            time_str = r.json()["datetime"].split("T")[1][:5]
+            return f"Current time in {location.title()}: {time_str}"
+    except:
+        return "⚠️ Time service unavailable."
+
 # === MAIN LOGIC ===
-def ask_local(prompt: str) -> str:
+async def ask_local(prompt: str) -> str:
     prompt = prompt.replace(f"@{BOT_HANDLE}", "you")
     
     # === WEB SEARCH DETECTION ===
@@ -86,61 +142,51 @@ def ask_local(prompt: str) -> str:
             web_query = parts[1].strip()
     
     if web_query:
+        query_lower = web_query.lower()
+        
+        # BITCOIN PRICE
+        if "bitcoin" in query_lower and "price" in query_lower:
+            return await get_bitcoin_price()
+        
+        # WEATHER
+        if "weather" in query_lower or "temperature" in query_lower:
+            for city in ["london", "tokyo", "new york", "paris", "berlin", "moscow"]:
+                if city in query_lower:
+                    return await get_weather(city)
+            return "⚠️ Specify a city: 'web weather in London'"
+        
+        # TIME
+        if "time" in query_lower:
+            for loc in ["london", "tokyo", "new york", "paris", "berlin", "moscow"]:
+                if loc in query_lower:
+                    return await get_time(loc)
+            return "⚠️ Specify location: 'web time in Tokyo'"
+        
+        # FACTUAL QUERIES (DuckDuckGo)
         try:
-            from googlesearch import search
-            from urllib.parse import urlparse
+            from urllib.parse import quote_plus
+            query = quote_plus(web_query)
+            url = f"https://api.duckduckgo.com/?q={query}&format=json&no_html=1&skip_disambig=1"
             
-            # Get top 3 results
-            urls = []
-            for url in search(web_query, num_results=3, lang="en", sleep_interval=1):
-                urls.append(url)
-                if len(urls) >= 3:
-                    break
+            async with httpx.AsyncClient() as client:
+                response = await client.get(url, timeout=10.0)
+                data = response.json()
+                
+                answer = data.get("AbstractText", "").strip()
+                if not answer:
+                    related = data.get("RelatedTopics", [])
+                    if related and isinstance(related[0], dict):
+                        answer = related[0].get("Text", "").strip()
+                
+                if answer:
+                    if len(answer) > MAX_LEN:
+                        answer = answer[:MAX_LEN].rsplit(' ', 1)[0] + "…"
+                    return answer
             
-            if not urls:
-                return "🌐 No results found."
+            return "🌐 No clear answer found."
             
-            # Build context from domains
-            domains = [urlparse(url).netloc for url in urls]
-            context = "\n".join([f"- Source: {domain}" for domain in domains[:3]])
-            
-            # Generate response
-            search_prompt = (
-                f"User asked: '{web_query}'.\n"
-                f"Relevant sources:\n{context}\n"
-                "Provide a concise factual answer. If unsure, say 'Not enough info'."
-            )
-            
-            messages = [
-                {"role": "system", "content": "You are a helpful AI assistant. Answer briefly and clearly. Keep under 300 chars. No links or emojis."},
-                {"role": "user", "content": search_prompt}
-            ]
-            
-            full_prompt = ""
-            for msg in messages:
-                if msg["role"] == "user":
-                    full_prompt += "  user\n" + msg['content'] + "  \n"
-                else:
-                    full_prompt += "  system\n" + msg['content'] + "  \n"
-            full_prompt += "  assistant\n"
-
-            out = llm(
-                full_prompt,
-                max_tokens=120,
-                stop=["  ", "  "],
-                echo=False,
-                temperature=0.3
-            )
-            ans = out["choices"][0]["text"].strip()
-            ans = " ".join(ans.split())
-            
-            if len(ans) <= MAX_LEN:
-                return ans
-            truncated = ans[:MAX_LEN].rsplit(' ', 1)[0]
-            return truncated + "…" if truncated else ans[:MAX_LEN-1] + "…"
-
         except Exception as e:
-            print(f"[GOOGLE SEARCH ERROR] {e}")
+            print(f"[DUCKDUCKGO ERROR] {e}")
             return "⚠️ Search failed. Try again later."
 
     # === REGULAR MODE ===
@@ -346,11 +392,11 @@ async def main():
             if parent_text:
                 prompt = f"User replied to: '{parent_text}'. Comment: '{txt}'. Respond helpfully."
 
-            reply = ask_local(prompt)
+            reply = await ask_local(prompt)
             if is_duplicate_reply(reply, recent_replies):
                 print("[DUPLICATE] Generating fallback response...")
                 fallback_prompt = "Give a completely different response."
-                reply = ask_local(fallback_prompt)
+                reply = await ask_local(fallback_prompt)
 
             recent_replies.append(reply)
             if len(recent_replies) > 100:
