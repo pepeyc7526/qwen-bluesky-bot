@@ -79,5 +79,21 @@ Scheduled runs are **disabled by default** (no cron) to give you full control an
 > This bot is built for **privacy**, **efficiency**, and **user sovereignty**.
 
 ---
+> ⚠️ **Important: State files are public by default**  
+> This repository includes `last_processed.json` and `recent_replies.json` — they contain my personal bot state (timestamps, reply history).  
+>   
+> **If you fork this repo**:  
+> - These files will be copied to your fork  
+> - Your bot will inherit **my conversation history** and **my last processed time**  
+> - All future state updates will be **public in your fork's commit history**  
+>   
+> To start fresh:  
+> 1. Delete these files from your fork  
+> 2. Add them to `.gitignore`  
+> 3. Run the workflow — new files will auto-generate with clean state  
+>   
+> *There is no way to make these files private while keeping the bot fully automated on GitHub Actions — they must be committed to persist state between runs.*
+
+---
 
 Made with ❤️ using **[Qwen AI](https://chat.qwen.ai/)** and **[Bluesky](https://bsky.app/)**.
