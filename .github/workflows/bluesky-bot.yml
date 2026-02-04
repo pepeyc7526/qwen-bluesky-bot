@@ -48,6 +48,4 @@ jobs:
           PAT: ${{ secrets.PAT }}
           GITHUB_TOKEN: ${{ secrets.PAT }}
           BOT_STATE: ${{ secrets.BOT_STATE }}
-          GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
-          GOOGLE_CSE_ID: ${{ secrets.GOOGLE_CSE_ID }} 
         run: python fresh_bot.py
