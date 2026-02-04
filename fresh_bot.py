@@ -163,21 +163,17 @@ def ask_local(prompt: str) -> str:
     full_prompt = ""
     for msg in messages:
         if msg["role"] == "user":
-            full_prompt += "<think>
-user\n" + msg['content'] + "</think>\n"
+            full_prompt += "  user\n" + msg['content'] + "  \n"
         elif msg["role"] == "assistant":
-            full_prompt += "<think>
-assistant\n" + msg['content'] + "<think>\n"
+            full_prompt += "  assistant\n" + msg['content'] + "  \n"
         else:
-            full_prompt += "</tool_call>
-system\n" + msg['content'] + "</tool_call>\n"
-    full_prompt += "<think>
-assistant\n"
+            full_prompt += "  system\n" + msg['content'] + "  \n"
+    full_prompt += "  assistant\n"
 
     out = llm(
         full_prompt,
         max_tokens=120,
-        stop=["<think>", "<think>"],
+        stop=["  ", "  "],
         echo=False,
         temperature=0.3
     )
