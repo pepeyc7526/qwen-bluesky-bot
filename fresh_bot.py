@@ -2,77 +2,47 @@
 import os, json, datetime, asyncio, httpx, random
 from llama_cpp import Llama
 
-# === GitHub Secrets ===
-GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")  # Must be set to your PAT with repo scope
-REPO = os.getenv("GITHUB_REPOSITORY")
-STATE_SECRET_NAME = "BOT_STATE"
-
 BOT_HANDLE = os.getenv("BOT_HANDLE")
 BOT_PASSWORD = os.getenv("BOT_PASSWORD")
 BOT_DID = os.getenv("BOT_DID")
 OWNER_DID = os.getenv("OWNER_DID")
 MAX_LEN = 300
 
-if not all([BOT_HANDLE, BOT_PASSWORD, BOT_DID, OWNER_DID, GITHUB_TOKEN, REPO]):
-    raise RuntimeError("Missing required env vars: BOT_HANDLE, BOT_PASSWORD, BOT_DID, OWNER_DID, GITHUB_TOKEN, GITHUB_REPOSITORY")
+if not all([BOT_HANDLE, BOT_PASSWORD, BOT_DID, OWNER_DID]):
+    raise RuntimeError("Missing required env vars: BOT_HANDLE, BOT_PASSWORD, BOT_DID, OWNER_DID")
 
 MODEL_PATH = "models/qwen2-7b-instruct-q4_k_m.gguf"
 llm = Llama(model_path=MODEL_PATH, n_ctx=2048, n_threads=2, verbose=False)
 
-# === State management via GitHub Secrets ===
-async def load_state():
-    """Load state from GitHub secret"""
+# === STATE MANAGEMENT ===
+def load_state():
+    """Load state from BOT_STATE secret (passed as env var)"""
     try:
-        url = f"https://api.github.com/repos/{REPO}/actions/secrets/{STATE_SECRET_NAME}"
-        headers = {"Authorization": f"token {GITHUB_TOKEN}"}
-        async with httpx.AsyncClient() as client:
-            r = await client.get(url, headers=headers)
-            if r.status_code == 404:
-                print("ℹ️ No state found — starting fresh")
-                return {}
-            value = r.json().get("value", "{}")
-            state = json.loads(value)
-            print(f"✅ Loaded state:")
-            print(f"   Last processed: {state.get('last_processed', 'N/A')}")
-            print(f"   Recent replies count: {len(state.get('recent_replies', []))}")
-            print(f"   Search usage: {state.get('search_usage', {}).get('count', 'N/A')}")
-            return state
+        state_str = os.getenv("BOT_STATE", "{}")
+        return json.loads(state_str)
     except Exception as e:
         print(f"[STATE LOAD ERROR] {e}")
         return {}
 
 async def save_state(state):
-    """Save state to GitHub secret"""
+    """Save state to BOT_STATE secret via GitHub API"""
     try:
-        url = f"https://api.github.com/repos/{REPO}/actions/secrets/{STATE_SECRET_NAME}"
+        repo = os.getenv("GITHUB_REPOSITORY")
+        token = os.getenv("GITHUB_TOKEN")  # Must be your PAT with repo scope
+        url = f"https://api.github.com/repos/{repo}/actions/secrets/BOT_STATE"
         headers = {
-            "Authorization": f"token {GITHUB_TOKEN}",
+            "Authorization": f"token {token}",
             "Accept": "application/vnd.github.v3+json"
         }
         payload = {"value": json.dumps(state)}
         async with httpx.AsyncClient() as client:
             r = await client.patch(url, headers=headers, json=payload)
             if r.status_code in (200, 204):
-                print(f"✅ State saved successfully")
-                print(f"   Last processed: {state.get('last_processed', 'N/A')}")
-                print(f"   Recent replies count: {len(state.get('recent_replies', []))}")
-                print(f"   Search usage: {state.get('search_usage', {}).get('count', 'N/A')}")
+                print("✅ State saved to secret")
             else:
-                print(f"[STATE SAVE ERROR] Status: {r.status_code}, Response: {r.text}")
+                print(f"[SAVE ERROR] Status {r.status_code}: {r.text}")
     except Exception as e:
-        print(f"[STATE SAVE EXCEPTION] {e}")
-
-def get_last_processed(state):
-    return state.get("last_processed", "1970-01-01T00:00:00.000Z")
-
-def get_recent_replies(state):
-    return state.get("recent_replies", [])
-
-def get_search_usage(state):
-    return state.get("search_usage", {"count": 0, "month": datetime.datetime.now().month})
-
-def should_reset_counter(usage):
-    return usage["month"] != datetime.datetime.now().month
+        print(f"[SAVE EXCEPTION] {e}")
 
 def is_duplicate_reply(new_reply, recent_replies):
     new_clean = new_reply.strip().lower()
@@ -81,7 +51,7 @@ def is_duplicate_reply(new_reply, recent_replies):
             return True
     return False
 
-# === Bluesky API functions ===
+# === BLUESKY FUNCTIONS (без изменений) ===
 async def get_fresh_token(client) -> str:
     url = "https://bsky.social/xrpc/com.atproto.server.createSession"
     payload = {"identifier": BOT_HANDLE, "password": BOT_PASSWORD}
@@ -209,20 +179,23 @@ async def main():
         token = await get_fresh_token(client)
         print("✅ Starting bot...")
 
-        # Load full state
-        state = await load_state()
-        last_indexed_at = get_last_processed(state)
-        recent_replies = get_recent_replies(state)
-        search_usage = get_search_usage(state)
+        # Load state from secret
+        state = load_state()
+        last_indexed_at = state.get("last_processed", "1970-01-01T00:00:00.000Z")
+        recent_replies = state.get("recent_replies", [])
+        search_usage = state.get("search_usage", {"count": 0, "month": datetime.datetime.now().month})
 
-        if should_reset_counter(search_usage):
+        # Reset counter if new month
+        if search_usage["month"] != datetime.datetime.now().month:
             search_usage = {"count": 0, "month": datetime.datetime.now().month}
 
+        # Fetch notifications
         url = "https://bsky.social/xrpc/app.bsky.notification.listNotifications"
         r = await client.get(url, headers={"Authorization": f"Bearer {token}"}, timeout=30.0)
         notifications = r.json().get("notifications", [])
         print(f"📥 Found {len(notifications)} notifications")
 
+        # Filter notifications
         new_notifs = []
         for notif in notifications:
             indexed_at = notif.get("indexedAt", "")
@@ -312,7 +285,7 @@ async def main():
             print(f"⏳ Waiting {delay} seconds...")
             await asyncio.sleep(delay)
 
-        # Update state
+        # Save updated state
         state["last_processed"] = latest_processed
         state["recent_replies"] = recent_replies
         state["search_usage"] = search_usage
