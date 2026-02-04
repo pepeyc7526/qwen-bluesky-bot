@@ -231,20 +231,25 @@ async def main():
             if record.get("$type") != "app.bsky.feed.post":
                 continue
 
-            # === ФИЛЬТРАЦИЯ: только упоминания или ответы боту ===
+            # === ФИЛЬТРАЦИЯ СОГЛАСНО ДОКУМЕНТАЦИИ BLUESKY ===
+            # Согласно спецификации: 
+            # - Упоминание (mention) всегда адресовано боту — обрабатываем
+            # - Ответ (reply) проверяем: является ли бот автором родительского поста?
             should_process = True
 
             if reason == "reply":
                 reply = record.get("reply", {})
                 parent_uri = reply.get("parent", {}).get("uri", "")
                 if parent_uri:
+                    # Извлекаем автора родительского поста через структуру URI
                     try:
-                        parent_did = parent_uri.split("/")[2]  # at://did:plc:xxx/... → did:plc:xxx
-                        if parent_did != BOT_DID:
+                        parent_parts = parent_uri.split("/")
+                        parent_repo = parent_parts[2]  # DID автора родительского поста
+                        if parent_repo != BOT_DID:
                             should_process = False
-                            print(f"[SKIP] Reply to non-bot post (DID: {parent_did})")
+                            print(f"[SKIP] Reply to non-bot post (author DID: {parent_repo})")
                     except Exception as e:
-                        print(f"[ERROR] Failed to parse parent DID: {e}")
+                        print(f"[ERROR] Failed to parse parent author: {e}")
                 else:
                     print("[SKIP] Reply without parent URI")
                     should_process = False
