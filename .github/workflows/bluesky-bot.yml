@@ -70,9 +70,10 @@ jobs:
           git add search_usage.json last_processed.json 2>/dev/null || true
           if ! git diff --cached --quiet; then
             git commit -m "Update bot state"
+            # Automatically resolve conflicts by taking our version (newer timestamp)
             git pull origin main -X ours 2>/dev/null || true
             git push
             echo "✅ State files committed successfully"
           else
-            echo "ℹ️ No changes to commit (last_processed.json unchanged)"
+            echo "ℹ️ No changes to commit"
           fi
