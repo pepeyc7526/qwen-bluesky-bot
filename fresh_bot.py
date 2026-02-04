@@ -10,66 +10,48 @@ MAX_LEN = 300
 SEARCH_USAGE_FILE = "search_usage.json"
 LAST_PROCESSED_FILE = "last_processed.json"
 RECENT_REPLIES_FILE = "recent_replies.json"  # File to store recent replies
-MAX_RECENT = 20  # Store last 20 replies
+MAX_RECENT = 100  # Store last 100 replies
 
 if not all([BOT_HANDLE, BOT_PASSWORD, BOT_DID, OWNER_DID]):
     raise RuntimeError("Missing required env vars: BOT_HANDLE, BOT_PASSWORD, BOT_DID, OWNER_DID")
 
 MODEL_PATH = "models/qwen2-7b-instruct-q4_k_m.gguf"
-llm = Llama(model_path=MODEL_PATH, n_ctx=2048, n_threads=2, verbose=False)  # Can increase n_ctx to 8192 if hardware allows to suppress warning
-
-# Cache file data
-_last_processed_cache = None
-_search_usage_cache = None
+llm = Llama(model_path=MODEL_PATH, n_ctx=2048, n_threads=2, verbose=False)
 
 def load_last_processed():
-    global _last_processed_cache
-    if _last_processed_cache is not None:
-        return _last_processed_cache
-    
+    """Load last processed timestamp from file"""
     if os.path.exists(LAST_PROCESSED_FILE):
         try:
             with open(LAST_PROCESSED_FILE, "r") as f:
                 data = json.load(f)
-                result = data.get("indexedAt", "1970-01-01T00:00:00.000Z")
-                _last_processed_cache = result
-                return result
+                return data.get("indexedAt", "1970-01-01T00:00:00.000Z")
         except (json.JSONDecodeError, ValueError) as e:
             print(f"[WARNING] Invalid JSON in {LAST_PROCESSED_FILE}: {e}. Using default timestamp.")
-            return "1970-01-01T00:00:00.000Z"
-    else:
-        return "1970-01-01T00:00:00.000Z"
+    return "1970-01-01T00:00:00.000Z"
 
 def save_last_processed(indexed_at):
-    global _last_processed_cache
+    """Save last processed timestamp to file"""
     with open(LAST_PROCESSED_FILE, "w") as f:
         json.dump({"indexedAt": indexed_at}, f)
-    _last_processed_cache = indexed_at
 
 def load_search_usage():
-    global _search_usage_cache
-    if _search_usage_cache is not None:
-        return _search_usage_cache
-    
+    """Load search usage counter from file"""
     if os.path.exists(SEARCH_USAGE_FILE):
         try:
             with open(SEARCH_USAGE_FILE, "r") as f:
-                result = json.load(f)
-                _search_usage_cache = result
-                return result
+                return json.load(f)
         except (json.JSONDecodeError, ValueError):
             print(f"[WARNING] Invalid JSON in {SEARCH_USAGE_FILE}. Using default values.")
-            return {"count": 0, "month": datetime.datetime.now().month}
     return {"count": 0, "month": datetime.datetime.now().month}
 
 def save_search_usage(count: int):
-    global _search_usage_cache
+    """Save search usage counter to file"""
     data = {"count": count, "month": datetime.datetime.now().month}
     with open(SEARCH_USAGE_FILE, "w") as f:
         json.dump(data, f)
-    _search_usage_cache = data
 
 def should_reset_counter():
+    """Check if monthly counter should reset"""
     usage = load_search_usage()
     current_month = datetime.datetime.now().month
     return usage["month"] != current_month
@@ -127,7 +109,7 @@ async def get_cid(uri: str, token: str, client) -> str:
         return cid
     except Exception as e:
         print(f"[CID ERROR] {e}. URI: {uri}")
-        raise  # Do not use fallback to avoid posting with dummy CID
+        raise
 
 async def post_reply(text: str, root_uri: str, root_cid: str, parent_uri: str, parent_cid: str, token: str, client):
     url = "https://bsky.social/xrpc/com.atproto.repo.createRecord"
@@ -146,7 +128,6 @@ async def post_reply(text: str, root_uri: str, root_cid: str, parent_uri: str, p
     }
     try:
         r = await client.post(url, headers={"Authorization": f"Bearer {token}"}, json=payload, timeout=30.0)
-        print(f"[POST DEBUG] Status: {r.status_code}, Response: {r.text}")  # For debugging
         r.raise_for_status()
     except Exception as e:
         print(f"[POST ERROR] Failed to post reply: {e}")
@@ -204,32 +185,35 @@ async def get_parent_post_text(uri: str, token: str, client) -> str:
 
 def ask_local(prompt: str) -> str:
     prompt = prompt.replace(f"@{BOT_HANDLE}", "you")
-
+    
     messages = [
-    {"role": "system", "content": "You are a helpful AI assistant. Answer briefly and clearly. Keep under 300 chars. No links or emojis. NEVER repeat the same joke twice."},
-    {"role": "user", "content": prompt}
+        {"role": "system", "content": "You are a helpful AI assistant. Answer briefly and clearly. Keep under 300 chars. No links or emojis. NEVER repeat the same information twice."},
+        {"role": "user", "content": prompt}
     ]
     
     full_prompt = ""
     for msg in messages:
         if msg["role"] == "user":
-            full_prompt += "<|im_start|>user\n" + msg['content'] + "<|im_end|>\n"
+            full_prompt += "  user\n" + msg['content'] + "  \n"
         elif msg["role"] == "assistant":
-            full_prompt += "<|im_start|>assistant\n" + msg['content'] + "<|im_end|>\n"
+            full_prompt += "  assistant\n" + msg['content'] + "  \n"
         else:
-            full_prompt += "<|im_start|>system\n" + msg['content'] + "<|im_end|>\n"
-    full_prompt += "<|im_start|>assistant\n"
+            full_prompt += "  system\n" + msg['content'] + "  \n"
+    full_prompt += "  assistant\n"
+
     out = llm(
         full_prompt,
         max_tokens=120,
-        stop=["<|im_end|>", "<|im_start|>"],
+        stop=["  ", "  "],
         echo=False,
         temperature=0.3
     )
     ans = out["choices"][0]["text"].strip()
     ans = " ".join(ans.split())
+
     if any(w in ans.lower() for w in ["don't know", "unclear", "provide more", "doesn't seem"]):
         ans = "🤔 Not sure what you mean. Try rephrasing!"
+
     if len(ans) <= MAX_LEN:
         return ans
     truncated = ans[:MAX_LEN].rsplit(' ', 1)[0]
@@ -277,7 +261,7 @@ async def main():
                     continue
                 if record.get("$type") != "app.bsky.feed.post":
                     continue
-                # Added filtering: only direct mentions or replies to bot (from previous version)
+                # Added filtering: only direct mentions or replies to bot
                 should_process = False
                 if reason == "mention":
                     if f"@{BOT_HANDLE}" in txt.lower():
