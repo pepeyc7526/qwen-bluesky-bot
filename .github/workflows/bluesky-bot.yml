@@ -5,6 +5,11 @@ on:
   repository_dispatch:
     types: [trigger-bot]
 
+# Prevent parallel runs
+concurrency:
+  group: "bluesky-bot"
+  cancel-in-progress: true
+
 jobs:
   run:
     runs-on: ubuntu-latest
