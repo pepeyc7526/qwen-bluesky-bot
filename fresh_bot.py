@@ -4,7 +4,7 @@ from llama_cpp import Llama
 
 # === GitHub Secrets ===
 GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")  # Must be set to your PAT with repo scope
-REPO = os.getenv("GITHUB_REPOSITORY")      # e.g. "pepeyc7526/qwen-bluesky-bot"
+REPO = os.getenv("GITHUB_REPOSITORY")
 STATE_SECRET_NAME = "BOT_STATE"
 
 BOT_HANDLE = os.getenv("BOT_HANDLE")
