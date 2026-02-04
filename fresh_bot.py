@@ -75,16 +75,20 @@ def is_duplicate_reply(new_reply, recent_replies):
 def ask_local(prompt: str) -> str:
     prompt = prompt.replace(f"@{BOT_HANDLE}", "you")
     
-    # === WEB SEARCH: only if 'web' in single quotes ===
+    # === WEB SEARCH: flexible quote detection ===
     web_query = None
-    prompt_lower = prompt.lower()
-    if "'web'" in prompt_lower:
-        start = prompt_lower.find("'web'")
-        if start != -1:
-            after_quote = prompt[start + 6:].strip()  # len("'web'") = 6
-            if after_quote:
-                web_query = after_quote
-
+    prompt_clean = prompt.strip()
+    
+    # Case 1: Starts with 'web'
+    if prompt_clean.lower().startswith("'web'"):
+        web_query = prompt_clean[6:].strip()
+    
+    # Case 2: 'web' somewhere in the middle
+    elif " 'web' " in prompt_clean.lower():
+        parts = prompt_clean.split("'web'", 1)
+        if len(parts) == 2:
+            web_query = parts[1].strip()
+    
     if web_query:
         try:
             from urllib.parse import quote_plus
@@ -94,10 +98,7 @@ def ask_local(prompt: str) -> str:
             response = httpx.get(url, timeout=10.0)
             data = response.json()
             
-            # Try AbstractText first
             answer = data.get("AbstractText", "").strip()
-            
-            # Fallback to first RelatedTopic
             if not answer:
                 related = data.get("RelatedTopics", [])
                 if related and isinstance(related[0], dict):
