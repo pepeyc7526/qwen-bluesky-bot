@@ -54,6 +54,7 @@ jobs:
           fi
 
       - name: Run bot
+        id: bot
         env:
           BOT_HANDLE: ${{ secrets.BOT_HANDLE }}
           BOT_PASSWORD: ${{ secrets.BOT_PASSWORD }}
@@ -61,7 +62,20 @@ jobs:
           OWNER_DID: ${{ secrets.OWNER_DID }}
           GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
           GOOGLE_CSE_ID: ${{ secrets.GOOGLE_CSE_ID }}
-        run: python fresh_bot.py
+        run: |
+          python fresh_bot.py
+          # Create flag file if notifications were processed
+          if grep -q "🎉 Done:" fresh_bot.log 2>/dev/null; then
+            touch .has_notifications
+          fi
+
+      - name: Exit early if no notifications
+        if: steps.bot.outcome == 'success' && !env.HAS_NOTIFICATIONS
+        run: |
+          if [ ! -f ".has_notifications" ]; then
+            echo "ℹ️ No notifications to process — skipping state commit"
+            exit 0
+          fi
 
       - name: Commit state files
         run: |
@@ -70,7 +84,7 @@ jobs:
           git add search_usage.json last_processed.json 2>/dev/null || true
           if ! git diff --cached --quiet; then
             git commit -m "Update bot state"
-            # Automatically resolve conflicts by taking our version (newer timestamp)
+            # Automatically resolve conflicts by taking our version
             git pull origin main -X ours 2>/dev/null || true
             git push
             echo "✅ State files committed successfully"
