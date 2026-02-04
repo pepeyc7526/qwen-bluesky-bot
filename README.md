@@ -9,31 +9,31 @@
 A **private, self-hosted AI assistant** for your Bluesky account — powered by the open-source **Qwen2-7B** model.  
 Runs entirely on free infrastructure. No external APIs. Full user control.
 
-> ✨ **Now with smart reply filtering & duplicate prevention!**
+> 🔒 **All state is stored in encrypted GitHub Secrets — never committed to the repo. Your history stays private.**
 
 ---
 
-## ✅ Features
+## ✨ Features
 
-- **Private & local**: All inference runs on GitHub Actions via `llama-cpp-python`
-- **Free forever**: Uses quantized **Qwen2-7B GGUF (Q4_K_M)** — no paid services
+- **100% private**: State (last processed time, reply history) stored in **GitHub Secrets**, not in public files
+- **Free & open**: Runs on GitHub Actions with quantized **Qwen2-7B GGUF (Q4_K_M)**
 - **Smart replies**: Only responds to:
   - Direct mentions: `@your-bot.bsky.social hello`
-  - Replies to its own posts (no mention needed)
-- **No spam**: Ignores replies in threads not addressed to it
+  - Replies to its own posts
+- **No spam**: Ignores unrelated threads
 - **Duplicate protection**: Remembers last **100 responses** to avoid repeats
 - ⏳ **Natural pacing**: Random 1–2 minute delays between replies
-- 🔍 **Web search** (optional): Type `web <query>` to fetch live results
-- 📅 **Monthly quota**: Web search counter resets automatically
-- 💾 **Persistent memory**: Saves state via Git-committed JSON files
+- 🔍 **Live web search**: Type `'web' <query>` to fetch real-time answers
+- 💾 **Persistent memory**: State auto-saved via encrypted GitHub Secrets API
 
 ---
 
 ## 🚀 Quick Start
 
-1. **Fork this repo**
-2. Add these **secrets** in  
-   `Settings → Secrets and variables → Actions`:
+### 1. Fork this repository
+
+### 2. Add secrets in  
+`Settings → Secrets and variables → Actions`
 
 | Secret | Value |
 |--------|-------|
@@ -42,27 +42,50 @@ Runs entirely on free infrastructure. No external APIs. Full user control.
 | `BOT_DID` | Run `atproto identity resolve <handle>` to get it |
 | `OWNER_DID` | Your personal account’s DID |
 | `PAT` | GitHub Personal Access Token (**classic**, `repo` scope) |
+| `BOT_STATE` | Initial state (see below) |
 
-> 🔑 Optional: Add `GOOGLE_API_KEY` + `GOOGLE_CSE_ID` for web search
+> 💡 **Initial `BOT_STATE`**:  
+> ```json
+> {
+>   "last_processed": "2026-01-01T00:00:00.000Z",
+>   "recent_replies": [],
+>   "search_usage": {"count": 0, "month": 1}
+> }
+> ```
+> Replace the date with your last notification timestamp to avoid processing old messages.
 
-3. **Enable Actions** and run the workflow manually
+### 3. Enable Actions & run manually
 
-> 📝 On first run, the bot auto-creates `last_processed.json` and `search_usage.json`.
+Go to **Actions → Bluesky AI Bot → Run workflow**
 
 ---
 
-## ⚡ Instant Control: Use the Browser Extension!
+## 🔍 Web Search
 
-Scheduled runs are **disabled by default** (no cron) to give you full control and avoid GitHub’s 20-minute limit.
+To trigger a live search, use **single quotes** around `web`:
+
+**@your-bot.bsky.social 'web' weather in Tokyo?**
+
+
+✅ Works: `'web' climate change`  
+❌ Ignored: `web climate change` (no quotes)
+
+> ⚠️ DuckDuckGo API is used — no keys needed. Results are factual summaries (not future predictions).
+
+---
+
+## ⚡ Instant Control: Use the Browser Extension
+
+Scheduled runs are **disabled by default** to give you full control.
 
 👉 **Install the official extension**:  
 [**qwen-bluesky-bot-extension**](https://github.com/pepeyc7526/qwen-bluesky-bot-extension)
 
-- One-click trigger from your browser toolbar
-- No waiting — instant runs via `workflow_dispatch`
-- Secure: your PAT stays in your browser
+- One-click trigger from your browser
+- Secure: uses your PAT locally
+- No waiting — instant `workflow_dispatch`
 
-> 💡 You can still enable hourly cron if you prefer — just uncomment the schedule block in `.github/workflows/bluesky-bot.yml`.
+> 💡 You can still enable cron in `.github/workflows/bluesky-bot.yml` if preferred.
 
 ---
 
@@ -71,28 +94,13 @@ Scheduled runs are **disabled by default** (no cron) to give you full control an
 - **Model**: Qwen2-7B-Instruct-GGUF (Q4_K_M)
 - **Runtime**: Python 3.11 + `llama-cpp-python`
 - **Host**: GitHub Actions (free tier, CPU-only)
-- **Protocol**: Bluesky AT Protocol (HTTP)
+- **Search**: DuckDuckGo Instant Answer API (no key required)
+- **State**: Encrypted GitHub Secrets (via `pynacl`)
 
 ---
 
 > “AI should accelerate progress — not create barriers.”  
 > This bot is built for **privacy**, **efficiency**, and **user sovereignty**.
-
----
-> ⚠️ **Important: State files are public by default**  
-> This repository includes `last_processed.json` and `recent_replies.json` — they contain my personal bot state (timestamps, reply history).  
->   
-> **If you fork this repo**:  
-> - These files will be copied to your fork  
-> - Your bot will inherit **my conversation history** and **my last processed time**  
-> - All future state updates will be **public in your fork's commit history**  
->   
-> To start fresh:  
-> 1. Delete these files from your fork  
-> 2. Add them to `.gitignore`  
-> 3. Run the workflow — new files will auto-generate with clean state  
->   
-> *There is no way to make these files private while keeping the bot fully automated on GitHub Actions — they must be committed to persist state between runs.*
 
 ---
 
