@@ -11,12 +11,12 @@ OWNER_DID = os.getenv("OWNER_DID")
 MAX_LEN = 300
 
 if not all([BOT_HANDLE, BOT_PASSWORD, BOT_DID, OWNER_DID]):
-    raise RuntimeError("Missing required env vars: BOT_HANDLE, BOT_PASSWORD, BOT_DID, OWNER_DID")
+    raise RuntimeError("Missing required env vars")
 
 MODEL_PATH = "models/qwen2-7b-instruct-q4_k_m.gguf"
 llm = Llama(model_path=MODEL_PATH, n_ctx=2048, n_threads=2, verbose=False)
 
-# === GITHUB SECRETS ENCRYPTION ===
+# === GITHUB SECRETS ===
 def encrypt_secret(public_key: str, secret_value: str) -> str:
     public_key = public.PublicKey(public_key.encode("utf-8"), encoding.Base64Encoder())
     sealed_box = public.SealedBox(public_key)
@@ -51,17 +51,13 @@ async def save_state_encrypted(state):
             r = await client.put(url, headers=headers, json=payload)
             if r.status_code in (201, 204):
                 print("✅ State saved to secret")
-            else:
-                print(f"[SAVE ERROR] {r.status_code}: {r.text}")
     except Exception as e:
-        print(f"[SAVE EXCEPTION] {e}")
+        print(f"[SAVE ERROR] {e}")
 
 def load_state():
     try:
-        state_str = os.getenv("BOT_STATE", "{}")
-        return json.loads(state_str)
-    except Exception as e:
-        print(f"[STATE LOAD ERROR] {e}")
+        return json.loads(os.getenv("BOT_STATE", "{}"))
+    except:
         return {}
 
 def is_duplicate_reply(new_reply, recent_replies):
@@ -71,125 +67,10 @@ def is_duplicate_reply(new_reply, recent_replies):
             return True
     return False
 
-# === LIVE DATA APIS ===
-async def get_bitcoin_price():
-    try:
-        async with httpx.AsyncClient() as client:
-            r = await client.get("https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd", timeout=5.0)
-            price = r.json()["bitcoin"]["usd"]
-            return f"Current Bitcoin price: ${price:,}"
-    except:
-        return "⚠️ Bitcoin price unavailable."
-
-async def get_weather(city):
-    coords = {
-        "london": (51.5074, -0.1278),
-        "tokyo": (35.6895, 139.6917),
-        "new york": (40.7128, -74.0060),
-        "paris": (48.8566, 2.3522),
-        "berlin": (52.5200, 13.4050),
-        "moscow": (55.7558, 37.6173)
-    }
-    city_lower = city.lower()
-    if city_lower not in coords:
-        return "⚠️ Weather available for: London, Tokyo, New York, Paris, Berlin, Moscow."
-    
-    lat, lon = coords[city_lower]
-    url = f"https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lon}&current=temperature_2m"
-    try:
-        async with httpx.AsyncClient() as client:
-            r = await client.get(url, timeout=5.0)
-            temp = r.json()["current"]["temperature_2m"]
-            return f"Current temperature in {city.title()}: {temp}°C"
-    except:
-        return "⚠️ Weather service unavailable."
-
-async def get_time(location):
-    tz_map = {
-        "london": "Europe/London",
-        "tokyo": "Asia/Tokyo",
-        "new york": "America/New_York",
-        "paris": "Europe/Paris",
-        "berlin": "Europe/Berlin",
-        "moscow": "Europe/Moscow"
-    }
-    loc_lower = location.lower()
-    if loc_lower not in tz_map:
-        return "⚠️ Time available for: London, Tokyo, New York, Paris, Berlin, Moscow."
-    
-    tz = tz_map[loc_lower]
-    url = f"http://worldtimeapi.org/api/timezone/{tz}"
-    try:
-        async with httpx.AsyncClient() as client:
-            r = await client.get(url, timeout=5.0)
-            time_str = r.json()["datetime"].split("T")[1][:5]
-            return f"Current time in {location.title()}: {time_str}"
-    except:
-        return "⚠️ Time service unavailable."
-
 # === MAIN LOGIC ===
-async def ask_local(prompt: str) -> str:
+def ask_local(prompt: str) -> str:
     prompt = prompt.replace(f"@{BOT_HANDLE}", "you")
     
-    # === WEB SEARCH DETECTION ===
-    web_query = None
-    prompt_clean = prompt.strip()
-    if prompt_clean.lower().startswith("'web'"):
-        web_query = prompt_clean[6:].strip()
-    elif " 'web' " in prompt_clean.lower():
-        parts = prompt_clean.split("'web'", 1)
-        if len(parts) == 2:
-            web_query = parts[1].strip()
-    
-    if web_query:
-        query_lower = web_query.lower()
-        
-        # BITCOIN PRICE
-        if "bitcoin" in query_lower and "price" in query_lower:
-            return await get_bitcoin_price()
-        
-        # WEATHER
-        if "weather" in query_lower or "temperature" in query_lower:
-            for city in ["london", "tokyo", "new york", "paris", "berlin", "moscow"]:
-                if city in query_lower:
-                    return await get_weather(city)
-            return "⚠️ Specify a city: 'web weather in London'"
-        
-        # TIME
-        if "time" in query_lower:
-            for loc in ["london", "tokyo", "new york", "paris", "berlin", "moscow"]:
-                if loc in query_lower:
-                    return await get_time(loc)
-            return "⚠️ Specify location: 'web time in Tokyo'"
-        
-        # FACTUAL QUERIES (DuckDuckGo)
-        try:
-            from urllib.parse import quote_plus
-            query = quote_plus(web_query)
-            url = f"https://api.duckduckgo.com/?q={query}&format=json&no_html=1&skip_disambig=1"
-            
-            async with httpx.AsyncClient() as client:
-                response = await client.get(url, timeout=10.0)
-                data = response.json()
-                
-                answer = data.get("AbstractText", "").strip()
-                if not answer:
-                    related = data.get("RelatedTopics", [])
-                    if related and isinstance(related[0], dict):
-                        answer = related[0].get("Text", "").strip()
-                
-                if answer:
-                    if len(answer) > MAX_LEN:
-                        answer = answer[:MAX_LEN].rsplit(' ', 1)[0] + "…"
-                    return answer
-            
-            return "🌐 No clear answer found."
-            
-        except Exception as e:
-            print(f"[DUCKDUCKGO ERROR] {e}")
-            return "⚠️ Search failed. Try again later."
-
-    # === REGULAR MODE ===
     messages = [
         {"role": "system", "content": "You are a helpful AI assistant. Answer briefly and clearly. Keep under 300 chars. No links or emojis. NEVER repeat the same information twice."},
         {"role": "user", "content": prompt}
@@ -199,8 +80,6 @@ async def ask_local(prompt: str) -> str:
     for msg in messages:
         if msg["role"] == "user":
             full_prompt += "  user\n" + msg['content'] + "  \n"
-        elif msg["role"] == "assistant":
-            full_prompt += "  assistant\n" + msg['content'] + "  \n"
         else:
             full_prompt += "  system\n" + msg['content'] + "  \n"
     full_prompt += "  assistant\n"
@@ -237,8 +116,7 @@ async def get_cid(uri: str, token: str, client) -> str:
         url = f"https://bsky.social/xrpc/com.atproto.repo.getRecord?repo={repo}&collection={collection}&rkey={rkey}"
         r = await client.get(url, headers={"Authorization": f"Bearer {token}"}, timeout=30.0)
         return r.json().get("cid", "bafyreihjdbd4zq4f4a5v6w5z5g5q5j5j5j5j5j5j5j5j5j5j5j5j5j5j5j5j5j")
-    except Exception as e:
-        print(f"[CID ERROR] {e}")
+    except:
         return "bafyreihjdbd4zq4f4a5v6w5z5g5q5j5j5j5j5j5j5j5j5j5j5j5j5j5j5j5j5j"
 
 async def post_reply(text: str, root_uri: str, root_cid: str, parent_uri: str, parent_cid: str, token: str, client):
@@ -278,10 +156,8 @@ async def get_root_uri_and_cid(uri: str, token: str, client):
         root_cid = r_root.json().get("cid", "bafyreihjdbd4zq4f4a5v6w5z5g5q5j5j5j5j5j5j5j5j5j5j5j5j5j5j5j5j5j")
         
         return root_uri, root_cid
-    except Exception as e:
-        print(f"[ROOT EXTRACTION ERROR] {e}")
-        fallback_cid = "bafyreihjdbd4zq4f4a5v6w5z5g5q5j5j5j5j5j5j5j5j5j5j5j5j5j5j5j5j5j"
-        return uri, fallback_cid
+    except:
+        return uri, "bafyreihjdbd4zq4f4a5v6w5z5g5q5j5j5j5j5j5j5j5j5j5j5j5j5j5j5j5j5j"
 
 async def get_parent_post_text(uri: str, token: str, client) -> str:
     try:
@@ -300,8 +176,7 @@ async def get_parent_post_text(uri: str, token: str, client) -> str:
         r2 = await client.get(parent_url, headers={"Authorization": f"Bearer {token}"}, timeout=30.0)
         parent_record = r2.json().get("value", {})
         return parent_record.get("text", "")
-    except Exception as e:
-        print(f"[PARENT TEXT ERROR] {e}")
+    except:
         return ""
 
 async def mark_notifications_as_read(token: str, seen_at: str, client):
@@ -392,11 +267,11 @@ async def main():
             if parent_text:
                 prompt = f"User replied to: '{parent_text}'. Comment: '{txt}'. Respond helpfully."
 
-            reply = await ask_local(prompt)
+            reply = ask_local(prompt)
             if is_duplicate_reply(reply, recent_replies):
                 print("[DUPLICATE] Generating fallback response...")
                 fallback_prompt = "Give a completely different response."
-                reply = await ask_local(fallback_prompt)
+                reply = ask_local(fallback_prompt)
 
             recent_replies.append(reply)
             if len(recent_replies) > 100:
