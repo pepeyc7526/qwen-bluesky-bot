@@ -1,8 +1,6 @@
 name: Bluesky AI Bot (Qwen2 + Web Search)
 
 on:
-  # schedule:
-  #   - cron: '0 * * * *'
   workflow_dispatch:
   repository_dispatch:
     types: [trigger-bot]
@@ -72,5 +70,10 @@ jobs:
           git add search_usage.json last_processed.json 2>/dev/null || true
           if ! git diff --cached --quiet; then
             git commit -m "Update bot state"
+            # Разрешаем конфликты в пользу наших изменений
+            git pull origin main -X ours 2>/dev/null || true
             git push
+            echo "✅ State files committed successfully"
+          else
+            echo "ℹ️ No changes to commit (last_processed.json unchanged)"
           fi
