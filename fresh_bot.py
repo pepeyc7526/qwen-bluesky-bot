@@ -9,14 +9,16 @@ OWNER_DID = os.getenv("OWNER_DID")
 MAX_LEN = 300
 SEARCH_USAGE_FILE = "search_usage.json"
 LAST_PROCESSED_FILE = "last_processed.json"
+RECENT_REPLIES_FILE = "recent_replies.json"  # File to store recent replies
+MAX_RECENT = 20  # Store last 20 replies
 
 if not all([BOT_HANDLE, BOT_PASSWORD, BOT_DID, OWNER_DID]):
     raise RuntimeError("Missing required env vars: BOT_HANDLE, BOT_PASSWORD, BOT_DID, OWNER_DID")
 
 MODEL_PATH = "models/qwen2-7b-instruct-q4_k_m.gguf"
-llm = Llama(model_path=MODEL_PATH, n_ctx=2048, n_threads=2, verbose=False)  # Можно увеличить n_ctx до 8192, если hardware позволяет, чтобы убрать warning
+llm = Llama(model_path=MODEL_PATH, n_ctx=2048, n_threads=2, verbose=False)  # Can increase n_ctx to 8192 if hardware allows to suppress warning
 
-# Кеширование данных файлов
+# Cache file data
 _last_processed_cache = None
 _search_usage_cache = None
 
@@ -72,6 +74,31 @@ def should_reset_counter():
     current_month = datetime.datetime.now().month
     return usage["month"] != current_month
 
+# === RECENT REPLIES FUNCTIONS ===
+def load_recent_replies():
+    """Load recent replies from file"""
+    if os.path.exists(RECENT_REPLIES_FILE):
+        try:
+            with open(RECENT_REPLIES_FILE, "r") as f:
+                return json.load(f)
+        except:
+            return []
+    return []
+
+def save_recent_replies(replies):
+    """Save only last MAX_RECENT replies"""
+    with open(RECENT_REPLIES_FILE, "w") as f:
+        json.dump(replies[-MAX_RECENT:], f)
+
+def is_duplicate_reply(new_reply, recent_replies):
+    """Check for exact duplicate (case-insensitive)"""
+    new_clean = new_reply.strip().lower()
+    for reply in recent_replies:
+        if new_clean == reply.strip().lower():
+            return True
+    return False
+# ================================
+
 async def get_fresh_token(client) -> str:
     url = "https://bsky.social/xrpc/com.atproto.server.createSession"
     payload = {"identifier": BOT_HANDLE, "password": BOT_PASSWORD}
@@ -100,7 +127,7 @@ async def get_cid(uri: str, token: str, client) -> str:
         return cid
     except Exception as e:
         print(f"[CID ERROR] {e}. URI: {uri}")
-        raise  # Не используем fallback, чтобы не постить с dummy
+        raise  # Do not use fallback to avoid posting with dummy CID
 
 async def post_reply(text: str, root_uri: str, root_cid: str, parent_uri: str, parent_cid: str, token: str, client):
     url = "https://bsky.social/xrpc/com.atproto.repo.createRecord"
@@ -119,7 +146,7 @@ async def post_reply(text: str, root_uri: str, root_cid: str, parent_uri: str, p
     }
     try:
         r = await client.post(url, headers={"Authorization": f"Bearer {token}"}, json=payload, timeout=30.0)
-        print(f"[POST DEBUG] Status: {r.status_code}, Response: {r.text}")  # Для дебага
+        print(f"[POST DEBUG] Status: {r.status_code}, Response: {r.text}")  # For debugging
         r.raise_for_status()
     except Exception as e:
         print(f"[POST ERROR] Failed to post reply: {e}")
@@ -250,7 +277,7 @@ async def main():
                     continue
                 if record.get("$type") != "app.bsky.feed.post":
                     continue
-                # Добавленная фильтрация: только прямые упоминания или реплаи боту (из предыдущей версии)
+                # Added filtering: only direct mentions or replies to bot (from previous version)
                 should_process = False
                 if reason == "mention":
                     if f"@{BOT_HANDLE}" in txt.lower():
@@ -287,6 +314,10 @@ async def main():
             new_notifs.sort(key=lambda x: x[1])
             latest_processed = last_indexed_at
             processed_count = 0
+            
+            # Load recent replies history
+            recent_replies = load_recent_replies()
+
             for notif, indexed_at in new_notifs:
                 txt = notif["record"]["text"].strip()
                 uri = notif["uri"]
@@ -301,6 +332,17 @@ async def main():
                 if parent_text:
                     prompt = f"User replied to: '{parent_text}'. Comment: '{txt}'. Respond helpfully."
                 reply = ask_local(prompt)
+                
+                # Check for duplicate replies
+                if is_duplicate_reply(reply, recent_replies):
+                    print("[DUPLICATE] Generating fallback response...")
+                    fallback_prompt = "Give a completely different response. Do not repeat previous answers."
+                    reply = ask_local(fallback_prompt)
+                
+                # Save reply to history
+                recent_replies.append(reply)
+                save_recent_replies(recent_replies)
+
                 await post_reply(reply, root_uri, root_cid, parent_uri, parent_cid, token, client)
                 print(f"✅ Replied directly to user's comment: '{reply}'")
                 processed_count += 1
