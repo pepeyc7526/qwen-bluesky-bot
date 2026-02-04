@@ -28,7 +28,7 @@ jobs:
 
       - name: Install Python dependencies
         run: |
-          pip install httpx llama-cpp-python
+          pip install httpx llama-cpp-python pynacl
 
       - name: Download Qwen2-7B GGUF model
         run: |
