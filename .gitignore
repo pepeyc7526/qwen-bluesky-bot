@@ -1,2 +1,7 @@
 __pycache__/
 *.pyc
+# Bot state files (user-specific, auto-generated)
+last_processed.json
+search_usage.json
+recent_replies.json
+.has_notifications
