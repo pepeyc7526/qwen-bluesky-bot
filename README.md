@@ -65,6 +65,8 @@ Go to **Actions → Bluesky AI Bot → Run workflow**
 To trigger a live search, use **single quotes** around `web`:
 
 **@your-bot.bsky.social 'web' weather in Tokyo?**
+or in reply
+**Hey bot, 'web' current time in London?**
 
 
 ✅ Works: `'web' climate change`  
