@@ -14,9 +14,9 @@ if not all([BOT_HANDLE, BOT_PASSWORD, BOT_DID, OWNER_DID]):
     raise RuntimeError("Missing required env vars: BOT_HANDLE, BOT_PASSWORD, BOT_DID, OWNER_DID")
 
 MODEL_PATH = "models/qwen2-7b-instruct-q4_k_m.gguf"
-llm = Llama(model_path=MODEL_PATH, n_ctx=2048, n_threads=2, verbose=False)  # Can increase n_ctx to 8192 if hardware allows to suppress warning
+llm = Llama(model_path=MODEL_PATH, n_ctx=2048, n_threads=2, verbose=False)  # Можно увеличить n_ctx до 8192, если hardware позволяет, чтобы убрать warning
 
-# Cache file data
+# Кеширование данных файлов
 _last_processed_cache = None
 _search_usage_cache = None
 
@@ -73,7 +73,7 @@ def should_reset_counter():
     return usage["month"] != current_month
 
 async def get_fresh_token(client) -> str:
-    url = "https://bsky.social/xrpc/com.atproto.server.createSession  "
+    url = "https://bsky.social/xrpc/com.atproto.server.createSession"
     payload = {"identifier": BOT_HANDLE, "password": BOT_PASSWORD}
     try:
         r = await client.post(url, json=payload, timeout=30.0)
@@ -91,7 +91,7 @@ async def get_cid(uri: str, token: str, client) -> str:
     try:
         parts = uri.split("/")
         repo, collection, rkey = parts[2], parts[3], parts[4]
-        url = f"https://bsky.social/xrpc/com.atproto.repo.getRecord?repo=  {repo}&collection={collection}&rkey={rkey}"
+        url = f"https://bsky.social/xrpc/com.atproto.repo.getRecord?repo={repo}&collection={collection}&rkey={rkey}"
         r = await client.get(url, headers={"Authorization": f"Bearer {token}"}, timeout=30.0)
         r.raise_for_status()
         cid = r.json().get("cid")
@@ -100,10 +100,10 @@ async def get_cid(uri: str, token: str, client) -> str:
         return cid
     except Exception as e:
         print(f"[CID ERROR] {e}. URI: {uri}")
-        raise  # Do not use fallback to avoid posting with dummy CID
+        raise  # Не используем fallback, чтобы не постить с dummy
 
 async def post_reply(text: str, root_uri: str, root_cid: str, parent_uri: str, parent_cid: str, token: str, client):
-    url = "https://bsky.social/xrpc/com.atproto.repo.createRecord  "
+    url = "https://bsky.social/xrpc/com.atproto.repo.createRecord"
     payload = {
         "repo": BOT_DID,
         "collection": "app.bsky.feed.post",
@@ -119,7 +119,7 @@ async def post_reply(text: str, root_uri: str, root_cid: str, parent_uri: str, p
     }
     try:
         r = await client.post(url, headers={"Authorization": f"Bearer {token}"}, json=payload, timeout=30.0)
-        print(f"[POST DEBUG] Status: {r.status_code}, Response: {r.text}")  # For debugging
+        print(f"[POST DEBUG] Status: {r.status_code}, Response: {r.text}")  # Для дебага
         r.raise_for_status()
     except Exception as e:
         print(f"[POST ERROR] Failed to post reply: {e}")
@@ -129,7 +129,7 @@ async def get_root_uri_and_cid(uri: str, token: str, client):
     try:
         parts = uri.split("/")
         repo, rkey = parts[2], parts[4]
-        url = f"https://bsky.social/xrpc/com.atproto.repo.getRecord?repo=  {repo}&collection=app.bsky.feed.post&rkey={rkey}"
+        url = f"https://bsky.social/xrpc/com.atproto.repo.getRecord?repo={repo}&collection=app.bsky.feed.post&rkey={rkey}"
         r = await client.get(url, headers={"Authorization": f"Bearer {token}"}, timeout=30.0)
         r.raise_for_status()
         data = r.json()
@@ -142,7 +142,7 @@ async def get_root_uri_and_cid(uri: str, token: str, client):
         root_uri = reply["root"]["uri"]
         root_parts = root_uri.split("/")
         root_repo, root_rkey = root_parts[2], root_parts[4]
-        root_url = f"https://bsky.social/xrpc/com.atproto.repo.getRecord?repo=  {root_repo}&collection=app.bsky.feed.post&rkey={root_rkey}"
+        root_url = f"https://bsky.social/xrpc/com.atproto.repo.getRecord?repo={root_repo}&collection=app.bsky.feed.post&rkey={root_rkey}"
         r_root = await client.get(root_url, headers={"Authorization": f"Bearer {token}"}, timeout=30.0)
         r_root.raise_for_status()
         root_cid = r_root.json().get("cid")
@@ -156,7 +156,7 @@ async def get_parent_post_text(uri: str, token: str, client) -> str:
     try:
         parts = uri.split("/")
         repo, rkey = parts[2], parts[4]
-        url = f"https://bsky.social/xrpc/com.atproto.repo.getRecord?repo=  {repo}&collection=app.bsky.feed.post&rkey={rkey}"
+        url = f"https://bsky.social/xrpc/com.atproto.repo.getRecord?repo={repo}&collection=app.bsky.feed.post&rkey={rkey}"
         r = await client.get(url, headers={"Authorization": f"Bearer {token}"}, timeout=30.0)
         r.raise_for_status()
         record = r.json().get("value", {})
@@ -166,7 +166,7 @@ async def get_parent_post_text(uri: str, token: str, client) -> str:
         parent_uri = reply["parent"]["uri"]
         parent_parts = parent_uri.split("/")
         parent_repo, parent_rkey = parent_parts[2], parent_parts[4]
-        parent_url = f"https://bsky.social/xrpc/com.atproto.repo.getRecord?repo=  {parent_repo}&collection=app.bsky.feed.post&rkey={parent_rkey}"
+        parent_url = f"https://bsky.social/xrpc/com.atproto.repo.getRecord?repo={parent_repo}&collection=app.bsky.feed.post&rkey={parent_rkey}"
         r2 = await client.get(parent_url, headers={"Authorization": f"Bearer {token}"}, timeout=30.0)
         r2.raise_for_status()
         parent_record = r2.json().get("value", {})
@@ -186,16 +186,16 @@ def ask_local(prompt: str) -> str:
     full_prompt = ""
     for msg in messages:
         if msg["role"] == "user":
-            full_prompt += "  user\n" + msg['content'] + "  \n"
+            full_prompt += "<|im_start|>user\n" + msg['content'] + "<|im_end|>\n"
         elif msg["role"] == "assistant":
-            full_prompt += "  assistant\n" + msg['content'] + "  \n"
+            full_prompt += "<|im_start|>assistant\n" + msg['content'] + "<|im_end|>\n"
         else:
-            full_prompt += "  system\n" + msg['content'] + "  \n"
-    full_prompt += "  assistant\n"
+            full_prompt += "<|im_start|>system\n" + msg['content'] + "<|im_end|>\n"
+    full_prompt += "<|im_start|>assistant\n"
     out = llm(
         full_prompt,
         max_tokens=120,
-        stop=["  ", "  "],
+        stop=["<|im_end|>", "<|im_start|>"],
         echo=False,
         temperature=0.3
     )
@@ -209,7 +209,7 @@ def ask_local(prompt: str) -> str:
     return truncated + "…" if truncated else ans[:MAX_LEN-1] + "…"
 
 async def mark_notifications_as_read(token: str, seen_at: str, client):
-    url = "https://bsky.social/xrpc/app.bsky.notification.updateSeen  "
+    url = "https://bsky.social/xrpc/app.bsky.notification.updateSeen"
     payload = {"seenAt": seen_at}
     try:
         r = await client.post(url, headers={"Authorization": f"Bearer {token}"}, json=payload, timeout=30.0)
@@ -227,7 +227,7 @@ async def main():
                 print("📅 Search counter reset")
             last_indexed_at = load_last_processed()
             print(f"🕒 Last processed notification: {last_indexed_at}")
-            url = "https://bsky.social/xrpc/app.bsky.notification.listNotifications  "
+            url = "https://bsky.social/xrpc/app.bsky.notification.listNotifications"
             r = await client.get(url, headers={"Authorization": f"Bearer {token}"}, timeout=30.0)
             r.raise_for_status()
             notifications = r.json().get("notifications", [])
@@ -250,7 +250,7 @@ async def main():
                     continue
                 if record.get("$type") != "app.bsky.feed.post":
                     continue
-                # Added filtering: only direct mentions or replies to bot (from previous version)
+                # Добавленная фильтрация: только прямые упоминания или реплаи боту (из предыдущей версии)
                 should_process = False
                 if reason == "mention":
                     if f"@{BOT_HANDLE}" in txt.lower():
