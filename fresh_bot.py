@@ -177,10 +177,10 @@ async def get_parent_post_text(uri: str, token: str, client) -> str:
 
 def ask_local(prompt: str) -> str:
     prompt = prompt.replace(f"@{BOT_HANDLE}", "you")
-    
+
     messages = [
-        {"role": "system", "content": "You are a helpful AI assistant. Answer briefly and clearly. Keep under 300 chars. No links or emojis."},
-        {"role": "user", "content": prompt}
+    {"role": "system", "content": "You are a helpful AI assistant. Answer briefly and clearly. Keep under 300 chars. No links or emojis. NEVER repeat the same joke twice."},
+    {"role": "user", "content": prompt}
     ]
     
     full_prompt = ""
