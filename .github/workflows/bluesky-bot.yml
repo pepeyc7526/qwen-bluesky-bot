@@ -1,4 +1,4 @@
-name: Bluesky AI Bot (Qwen2 + Web Search)
+name: Bluesky AI Bot (Qwen2)
 
 on:
   workflow_dispatch:
@@ -28,7 +28,7 @@ jobs:
 
       - name: Install Python dependencies
         run: |
-          pip install httpx llama-cpp-python pynacl googlesearch-python
+          pip install httpx llama-cpp-python pynacl  # ← УБРАН googlesearch-python
 
       - name: Download Qwen2-7B GGUF model
         run: |
