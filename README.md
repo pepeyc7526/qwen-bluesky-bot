@@ -41,7 +41,7 @@ Runs entirely on free infrastructure. No external APIs. Full user control.
 | `BOT_PASSWORD` | [App password](https://bsky.app/settings/app-passwords) from Bluesky |
 | `BOT_DID` | Run `atproto identity resolve <handle>` to get it |
 | `OWNER_DID` | Your personal account’s DID |
-| `PAT` | GitHub Personal Access Token (**classic**, `repo` scope) |
+| `PAT` | [GitHub Personal Access Token](https://github.com/settings/tokens) (**classic**, `repo` scope) |
 | `BOT_STATE` | Initial state (see below) |
 
 > 💡 **Initial `BOT_STATE`**:  
